@@ -24,6 +24,24 @@ Run PowerShell without administrator privileges:
 
 The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script for review when your policy requires it. Use `-InstallDir` for another user-owned location.
 
+## Querying the live database (companion workflow)
+
+`scripts/snipset-live.sh` runs the installed `snipset` CLI against a snapshot
+of the Snipset Desktop database, so reads never fight the running app for the
+live file:
+
+```sh
+export SNIPSET_LIVE_DB="$LOCALAPPDATA/Snipset/snipset.db"
+bash scripts/snipset-live.sh --json snippet search "query"
+bash scripts/snipset-live.sh --refresh snippet get <uuid>
+```
+
+Reads (`snippet list/get/search`, `group list`, `stats`, `clipboard`, `audio`,
+`reference`) use the snapshot in `$SNIPSET_LIVE_SNAPSHOT_DIR`
+(default `/tmp/snipset-live`). Writes (`snippet add/update/delete`, anything
+else) target the live database, but only after `snipset doctor` proves it is
+reachable. If the wrapper refuses a write, close Snipset Desktop and retry.
+
 ## Manual downloads
 
 Download the archive for your target from the release page, download `SHA256SUMS`, verify the matching line, and extract only into a user-owned directory. The release includes only the executable, required runtime files, and notices for the tested target.
