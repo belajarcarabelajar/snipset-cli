@@ -51,6 +51,12 @@ function columnDefinition(col) {
     case "keyword":
     case "snippet":
       return `${col} TEXT NOT NULL`;
+    case "matching_mode":
+      return "matching_mode TEXT NOT NULL DEFAULT 'strict'";
+    case "case_sensitivity":
+      return "case_sensitivity TEXT NOT NULL DEFAULT 'case-sensitive'";
+    case "content_type":
+      return "content_type TEXT NOT NULL DEFAULT 'text'";
     case "enabled":
     case "is_favorite":
     case "ai_generated":
@@ -189,8 +195,8 @@ export async function createDummyDb(dbPath, { seedSampleData = true } = {}) {
     db.run(`INSERT INTO groups (uuid, name, description, enabled, created_at, modified_at, is_pinned, sort_order, sync_enabled, logical_clock, is_deleted)
       VALUES ('grp-dummy-1', 'Default Group', 'Standard dummy group for pentest', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, 1, 0, 1, 0);`);
 
-    db.run(`INSERT INTO snippets (uuid, name, keyword, snippet, description, group_id, enabled, is_favorite, created_at, modified_at, logical_clock, is_deleted)
-      VALUES ('snp-dummy-1', 'Greeting Snippet', ':hello', 'Hello from isolated test fixture!', 'Demo greeting', 'grp-dummy-1', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 0);`);
+    db.run(`INSERT INTO snippets (uuid, name, keyword, snippet, description, matching_mode, case_sensitivity, content_type, group_id, enabled, is_favorite, created_at, modified_at, logical_clock, is_deleted)
+      VALUES ('snp-dummy-1', 'Greeting Snippet', ':hello', 'Hello from isolated test fixture!', 'Demo greeting', 'strict', 'case-sensitive', 'text', 'grp-dummy-1', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 0);`);
 
     db.run(`INSERT INTO preferences (key, value) VALUES ('theme', 'dark'), ('telemetry_enabled', 'false');`);
 
