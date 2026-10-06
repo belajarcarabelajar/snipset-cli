@@ -5,9 +5,12 @@
 # is reachable; otherwise the write is refused so a locked live file is
 # never touched from behind the running app.
 set -euo pipefail
+# The snapshot is a full copy of the live database and may hold secrets, so
+# keep everything this wrapper creates owner-only.
+umask 077
 refresh=0
 live="${SNIPSET_LIVE_DB:-}"
-snap_dir="${SNIPSET_LIVE_SNAPSHOT_DIR:-${TMPDIR:-/tmp}/snipset-live}"
+snap_dir="${SNIPSET_LIVE_SNAPSHOT_DIR:-${TMPDIR:-/tmp}/snipset-live-${UID}}"
 usage() { printf 'Usage: snipset-live.sh [--refresh] [--live-db PATH] [--snapshot-dir DIR] [--] <snipset args>\n' >&2; exit 2; }
 help() { printf 'Usage: snipset-live.sh [--refresh] [--live-db PATH] [--snapshot-dir DIR] [--] <snipset args>\n'; exit 0; }
 while (($#)); do
@@ -31,6 +34,9 @@ if [[ "$snap_dir" != "/" ]]; then
 fi
 [[ -n "$snap_dir" ]] || snap_dir="/"
 mkdir -p "$snap_dir"
+# Tighten a pre-existing directory too; chmod fails (and aborts) if another
+# user owns the path, which is the safe outcome for a shared location.
+[[ "$snap_dir" == "/" ]] || chmod 700 "$snap_dir"
 snap="$snap_dir/snipset.db"
 # Refresh when forced, missing, or older than the live database.
 if ((refresh)) || [[ ! -f "$snap" ]] || [[ "$live" -nt "$snap" ]]; then

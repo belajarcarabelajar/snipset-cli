@@ -60,8 +60,11 @@ done
 command -v curl >/dev/null || { echo 'install.sh: curl is required' >&2; exit 1; }
 command -v tar >/dev/null || { echo 'install.sh: tar is required' >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo 'install.sh: sha256sum is required' >&2; exit 1; }
-for path_value in "$install_dir" "$share_dir" "$bashrc"; do
-  [[ "$path_value" != *$'\n'* ]] || { echo 'install.sh: path must not contain newline' >&2; exit 2; }
+for path_value in "$install_dir" "$share_dir" "$bashrc" "$db"; do
+  case "$path_value" in
+    *$'\n'*|*$'\r'*|*'"'*|*'`'*|*'\'*|*'$'*)
+      echo 'install.sh: path must not contain newline or shell-special characters (" ` \ $)' >&2; exit 2 ;;
+  esac
 done
 if [[ -z "$version" ]]; then
   version="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
@@ -74,7 +77,7 @@ target="x86_64-unknown-linux-gnu"
 archive="snipset-cli-${version}-${target}.tar.gz"
 release_url="${base_url}/${version}"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/snipset-install.XXXXXX")"
-cleanup() { rm -rf "$tmp"; }
+cleanup() { rm -rf "$tmp" "${stage:-}"; }
 trap cleanup EXIT
 curl -fsSL "${release_url}/SHA256SUMS" -o "${tmp}/SHA256SUMS"
 curl -fsSL "${release_url}/${archive}" -o "${tmp}/${archive}"
