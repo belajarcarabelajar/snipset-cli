@@ -2,6 +2,8 @@
 
 Install the `snipset` terminal companion on Linux x64 or Windows x64 from public release assets. This repository contains installation scripts and release documentation; the CLI implementation and native builds remain private.
 
+Once `snipset` is installed, see the [user guide](docs/user-guide/) for a task-oriented walkthrough of creating a database, building snippet workflows, every command, the MCP server, and reading the live Desktop database.
+
 ## Linux x64
 
 Inspect the installer before running it, then install a pinned release:
