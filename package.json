@@ -1,0 +1,11 @@
+{
+  "name": "snipset-cli",
+  "private": true,
+  "version": "0.2.0",
+  "scripts": {
+    "test": "bun test tests/"
+  },
+  "engines": {
+    "bun": ">=1"
+  }
+}
