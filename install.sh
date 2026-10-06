@@ -17,11 +17,12 @@ do_shell=1
 do_shims=1
 do_mcp=0
 base_url="${SNIPSET_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
-usage() {
-  cat <<'EOF' >&2
+print_usage() {
+  cat <<'EOF'
 Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
                   [--share-dir DIR] [--db PATH] [--bashrc PATH]
                   [--no-init] [--no-shell] [--no-shims] [--with-mcp]
+                  [--help]
 
   --version VERSION  Release to install (default: latest).
   --install-dir DIR  Binary destination (default: ~/.local/bin).
@@ -33,7 +34,11 @@ Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
   --no-shell         Skip shell integration.
   --no-shims         Skip generating trigger shims.
   --with-mcp         Write ~/.config/opencode/opencode.json if absent.
+  --help, -h         Show this help and exit.
 EOF
+}
+usage() {
+  print_usage >&2
   exit 2
 }
 while (($#)); do
@@ -48,18 +53,23 @@ while (($#)); do
     --no-shell) do_shell=0; shift ;;
     --no-shims) do_shims=0; shift ;;
     --with-mcp) do_mcp=1; shift ;;
+    --help|-h) print_usage; exit 0 ;;
     *) usage ;;
   esac
 done
-[[ -z "$version" || "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: invalid version' >&2; exit 2; }
-[[ "$version" == v* ]] || version="v${version}"
 command -v curl >/dev/null || { echo 'install.sh: curl is required' >&2; exit 1; }
 command -v tar >/dev/null || { echo 'install.sh: tar is required' >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo 'install.sh: sha256sum is required' >&2; exit 1; }
+for path_value in "$install_dir" "$share_dir" "$bashrc"; do
+  [[ "$path_value" != *$'\n'* ]] || { echo 'install.sh: path must not contain newline' >&2; exit 2; }
+done
 if [[ -z "$version" ]]; then
   version="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: release version was not found' >&2; exit 1; }
+else
+  [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: invalid version' >&2; exit 2; }
+  [[ "$version" == v* ]] || version="v${version}"
 fi
-[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: release version was not found' >&2; exit 1; }
 target="x86_64-unknown-linux-gnu"
 archive="snipset-cli-${version}-${target}.tar.gz"
 release_url="${base_url}/${version}"
@@ -68,13 +78,14 @@ cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 curl -fsSL "${release_url}/SHA256SUMS" -o "${tmp}/SHA256SUMS"
 curl -fsSL "${release_url}/${archive}" -o "${tmp}/${archive}"
-expected="$(awk -v name="$archive" '$2 == name { print $1 }' "${tmp}/SHA256SUMS")"
+expected="$(awk -v name="$archive" '{ fname=$2; sub(/^[*]/, "", fname); if (fname == name) { print $1 } }' "${tmp}/SHA256SUMS")"
 [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { echo 'install.sh: checksum entry missing' >&2; exit 1; }
 actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
 [[ "$actual" == "$expected" ]] || { echo 'install.sh: checksum mismatch' >&2; exit 1; }
 while IFS= read -r entry; do
-  [[ "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || { echo 'install.sh: unsafe archive entry' >&2; exit 1; }
-done < <(tar -tzf "${tmp}/${archive}")
+  [[ "$entry" != *$'\n'* ]] || { echo 'install.sh: unsafe archive entry' >&2; exit 1; }
+  [[ "$entry" != -* && "$entry" != .-* && "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || { echo 'install.sh: unsafe archive entry' >&2; exit 1; }
+done < <(tar --quoting-style=escape -tzf "${tmp}/${archive}")
 if tar -tvzf "${tmp}/${archive}" | awk '$1 ~ /^l/ { found=1 } END { exit found ? 0 : 1 }'; then
   echo 'install.sh: symlinks are not allowed in release archives' >&2; exit 1
 fi
@@ -134,14 +145,17 @@ if ((do_init)); then
   fi
 fi
 if ((do_shims)) && ((has_shell)); then
+  shim_out=""
+  shim_rc=0
   if [[ -n "$db" ]]; then
-    if ! env "${setup_path[@]}" SNIPSET_DB="$db" "${install_dir}/snipset-shims" --dir "$install_dir"; then
-      note "shim generation skipped; run 'snipset-shims' after fixing the database"
-    fi
+    shim_out="$(env "${setup_path[@]}" SNIPSET_DB="$db" "${install_dir}/snipset-shims" --dir "$install_dir" 2>&1)" || shim_rc=$?
   else
-    if ! env "${setup_path[@]}" "${install_dir}/snipset-shims" --dir "$install_dir"; then
-      note "shim generation skipped; run 'snipset-shims' after fixing the database"
-    fi
+    shim_out="$(env "${setup_path[@]}" "${install_dir}/snipset-shims" --dir "$install_dir" 2>&1)" || shim_rc=$?
+  fi
+  if ((shim_rc != 0)); then
+    note "shim generation skipped; run 'snipset-shims' after fixing the database"
+  elif [[ -z "$shim_out" ]]; then
+    note "shim generator produced no output; run 'snipset-shims' to check triggers"
   fi
 elif ((do_shims)); then
   note "release predates the shell bundle; skipping shims"

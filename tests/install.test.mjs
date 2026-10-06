@@ -50,6 +50,10 @@ snipset snippet list --limit 500 2>/dev/null | while IFS='	' read -r _u kw _rest
 done
 `;
 
+const VERBOSE_GENERATOR = `#!/bin/sh
+echo "snipset-shims: generated 2 shims"
+`;
+
 const SHELL_STUBS = {
   "shell/snipset.sh": "# snipset.sh fixture\n",
   "shell/completion.bash": "# completion.bash fixture\n",
@@ -57,7 +61,12 @@ const SHELL_STUBS = {
   "shell/snipset-shims.sh": FAKE_GENERATOR,
 };
 
-async function fakeRelease({ badHash = false, withShell = true } = {}) {
+async function fakeRelease({
+  badHash = false,
+  withShell = true,
+  starMarker = false,
+  verboseShims = false,
+} = {}) {
   const dir = await mkdtemp(join(tmpdir(), "snipset-install-fixture-"));
   const binDir = join(dir, "bin");
   await mkdir(binDir);
@@ -68,7 +77,9 @@ async function fakeRelease({ badHash = false, withShell = true } = {}) {
   });
   const members = ["snipset"];
   if (withShell) {
-    for (const [name, content] of Object.entries(SHELL_STUBS)) {
+    const stubs = { ...SHELL_STUBS };
+    if (verboseShims) stubs["shell/snipset-shims.sh"] = VERBOSE_GENERATOR;
+    for (const [name, content] of Object.entries(stubs)) {
       const full = join(staging, name);
       await mkdir(dirname(full), { recursive: true });
       await writeFile(full, content, { mode: 0o755 });
@@ -78,7 +89,11 @@ async function fakeRelease({ badHash = false, withShell = true } = {}) {
   await run("tar", ["-czf", archive, "-C", staging, ...members]);
   const hash = (await run("sha256sum", [archive])).stdout.split(/\s+/)[0];
   const sums = join(dir, "SHA256SUMS");
-  await writeFile(sums, `${badHash ? "0".repeat(64) : hash}  ${archive.split("/").pop()}\n`);
+  // GNU coreutils writes a binary-mode marker (`*`) before the filename when
+  // the manifest was produced on a filesystem without text-mode translation.
+  // The installer must match the entry either way.
+  const marker = starMarker ? "*" : " ";
+  await writeFile(sums, `${badHash ? "0".repeat(64) : hash} ${marker}${archive.split("/").pop()}\n`);
   const curl = join(binDir, "curl");
   await writeFile(
     curl,
@@ -284,5 +299,76 @@ test("release without shell bundle still installs the binary", async () => {
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("empty --version falls back to the latest release instead of failing", async () => {
+  const fixture = await fakeRelease();
+  const home = await mkdtemp(join(tmpdir(), "snipset-home-"));
+  const installDir = join(home, "bin");
+  try {
+    const env = await freshEnv(fixture, home);
+    // The fake curl resolves */releases/latest to tag v0.1.0. An explicitly
+    // empty --version must take that branch, not normalize to a bare `v` and
+    // error out with `release version was not found`.
+    const result = await run("bash", [script, "--version", "", "--install-dir", installDir], { env });
+    const version = await run(join(installDir, "snipset"), ["--version"], {
+      env: { ...env, HOME: home },
+    });
+    assert.match(version.stdout, /0\.1\.0/);
+    assert.match(result.stdout, /Installed snipset v0\.1\.0/);
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("accepts a SHA256SUMS binary-mode marker entry", async () => {
+  const fixture = await fakeRelease({ starMarker: true });
+  const home = await mkdtemp(join(tmpdir(), "snipset-home-"));
+  const installDir = join(home, "bin");
+  try {
+    const env = await freshEnv(fixture, home);
+    await run("bash", [script, "--version", "0.1.0", "--install-dir", installDir], { env });
+    assert.ok(existsSync(join(installDir, "snipset")));
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("warns when the shim generator produces no output", async () => {
+  const fixture = await fakeRelease();
+  const home = await mkdtemp(join(tmpdir(), "snipset-home-"));
+  const installDir = join(home, "bin");
+  try {
+    const env = await freshEnv(fixture, home);
+    const result = await run("bash", [script, "--version", "0.1.0", "--install-dir", installDir], { env });
+    assert.match(result.stderr, /shim generator produced no output/);
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("does not warn when the shim generator reports output", async () => {
+  const fixture = await fakeRelease({ verboseShims: true });
+  const home = await mkdtemp(join(tmpdir(), "snipset-home-"));
+  const installDir = join(home, "bin");
+  try {
+    const env = await freshEnv(fixture, home);
+    const result = await run("bash", [script, "--version", "0.1.0", "--install-dir", installDir], { env });
+    assert.doesNotMatch(result.stderr, /shim generator produced no output/);
+    assert.ok(existsSync(join(installDir, "snipset")));
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("--help and -h print usage and exit 0", async () => {
+  for (const flag of ["--help", "-h"]) {
+    const result = await run("bash", [script, flag]);
+    assert.match(result.stdout, /Usage: install\.sh/);
   }
 });
