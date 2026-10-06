@@ -41,6 +41,7 @@ export const GROUP_COLUMNS = [
   "sync_enabled",
   "logical_clock",
   "is_deleted",
+  "research_tag",
 ];
 
 function columnDefinition(col) {
@@ -52,12 +53,15 @@ function columnDefinition(col) {
     case "snippet":
       return `${col} TEXT NOT NULL`;
     case "matching_mode":
-      return "matching_mode TEXT NOT NULL DEFAULT 'strict'";
+      return "matching_mode TEXT DEFAULT 'Strict'";
     case "case_sensitivity":
-      return "case_sensitivity TEXT NOT NULL DEFAULT 'case-sensitive'";
+      return "case_sensitivity TEXT DEFAULT 'CaseSensitive'";
     case "content_type":
-      return "content_type TEXT NOT NULL DEFAULT 'text'";
+      return "content_type TEXT DEFAULT 'Text'";
+    case "description":
+      return "description TEXT DEFAULT ''";
     case "enabled":
+      return "enabled INTEGER DEFAULT 1";
     case "is_favorite":
     case "ai_generated":
     case "logical_clock":
@@ -66,6 +70,8 @@ function columnDefinition(col) {
     case "sort_order":
     case "sync_enabled":
       return `${col} INTEGER DEFAULT 0`;
+    case "research_tag":
+      return "research_tag INTEGER NOT NULL DEFAULT 0";
     case "embedding":
       return "embedding BLOB";
     default:
