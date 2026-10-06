@@ -9,8 +9,10 @@ refresh=0
 live="${SNIPSET_LIVE_DB:-}"
 snap_dir="${SNIPSET_LIVE_SNAPSHOT_DIR:-${TMPDIR:-/tmp}/snipset-live}"
 usage() { printf 'Usage: snipset-live.sh [--refresh] [--live-db PATH] [--snapshot-dir DIR] [--] <snipset args>\n' >&2; exit 2; }
+help() { printf 'Usage: snipset-live.sh [--refresh] [--live-db PATH] [--snapshot-dir DIR] [--] <snipset args>\n'; exit 0; }
 while (($#)); do
   case "$1" in
+    --help|-h) help ;;
     --refresh) refresh=1; shift ;;
     --live-db) [[ $# -ge 2 ]] || usage; live="$2"; shift 2 ;;
     --snapshot-dir) [[ $# -ge 2 ]] || usage; snap_dir="$2"; shift 2 ;;
@@ -23,9 +25,15 @@ done
 (($#)) || usage
 [[ -n "$live" ]] || { echo 'snipset-live: set SNIPSET_LIVE_DB to the live database path' >&2; exit 2; }
 [[ -f "$live" ]] || { echo "snipset-live: live database not found: $live" >&2; exit 2; }
+# Normalize a trailing slash so "$snap_dir/snipset.db" never gains "//".
+if [[ "$snap_dir" != "/" ]]; then
+  snap_dir="${snap_dir%/}"
+fi
+[[ -n "$snap_dir" ]] || snap_dir="/"
 mkdir -p "$snap_dir"
 snap="$snap_dir/snipset.db"
-if ((refresh)) || [[ ! -f "$snap" ]]; then
+# Refresh when forced, missing, or older than the live database.
+if ((refresh)) || [[ ! -f "$snap" ]] || [[ "$live" -nt "$snap" ]]; then
   cp -f "$live" "$snap"
   for ext in -wal -shm; do
     if [[ -f "$live$ext" ]]; then cp -f "$live$ext" "$snap$ext"; else rm -f "$snap$ext"; fi
@@ -38,6 +46,7 @@ for a in "$@"; do
   if ((skip_next)); then skip_next=0; continue; fi
   case "$a" in
     --db) skip_next=1 ;;
+    --db=*) ;;
     -*) ;;
     *)
       if [[ -z "$cmd" ]]; then cmd="$a"; elif [[ -z "$sub" ]]; then sub="$a"; fi
@@ -47,7 +56,7 @@ done
 is_read=0
 case "$cmd" in
   snippet)
-    if [[ "$sub" == "list" || "$sub" == "get" || "$sub" == "search" ]]; then is_read=1; fi
+    if [[ "$sub" == "list" || "$sub" == "get" || "$sub" == "search" || "$sub" == "expand" ]]; then is_read=1; fi
     ;;
   group)
     if [[ "$sub" == "list" ]]; then is_read=1; fi
@@ -56,12 +65,25 @@ case "$cmd" in
     is_read=1
     ;;
 esac
+# Never forward a user-supplied --db: the wrapper owns the --db target
+# (snapshot for reads, live for gated writes) and a duplicate would let
+# the trailing flag silently win.
+fwd=()
+skip_next=0
+for a in "$@"; do
+  if ((skip_next)); then skip_next=0; continue; fi
+  case "$a" in
+    --db) skip_next=1; continue ;;
+    --db=*) continue ;;
+  esac
+  fwd+=("$a")
+done
 if ((is_read)); then
-  exec snipset --db "$snap" "$@"
+  exec snipset --db "$snap" "${fwd[@]}"
 fi
 if ! snipset --db "$live" doctor >/dev/null 2>&1; then
   echo 'snipset-live: refusing write: live database is locked or unreachable.' >&2
   echo 'snipset-live: close Snipset Desktop, then retry. Reads remain available from the snapshot.' >&2
   exit 3
 fi
-exec snipset --db "$live" "$@"
+exec snipset --db "$live" "${fwd[@]}"
