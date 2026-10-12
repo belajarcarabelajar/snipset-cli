@@ -1,7 +1,7 @@
 ---
 schema: ultra-plan/v1
 plan_id: 2026-10-12-snipset-cli-install-coverage
-status: Verification
+status: InProgress
 version: 1
 runner_contract: true
 defaults:
@@ -483,6 +483,79 @@ tasks:
       - cmd: "bash -c '! git log origin/main..HEAD --format=%B | rg -i \"co-authored-by|generated with|\\x{1F916}\"'"
         expect_exit: 0
         retry: 0
+  - id: F01
+    depends_on: []
+    impacts: ["every Linux install from a release archive - bun test tests/install-archive.test.mjs"]
+    files: { create: [], modify: [scripts/installer/sh/binary.sh, tests/install-archive.test.mjs, install.sh], test: [] }
+    idempotency_key: "F01:archive-entry-gaps"
+    skip_if: "timeout 200 bun test --timeout 30000 tests/install-archive.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 200 bun test --timeout 30000 tests/install-archive.test.mjs"
+        expect_exit: 1
+        retry: 0
+      - cmd: "timeout 200 bun test --timeout 30000 tests/install-archive.test.mjs"
+        expect_exit: 0
+        retry: 1
+      - cmd: "bun scripts/installer/build.mjs --check --target sh"
+        expect_exit: 0
+        retry: 0
+  - id: F02
+    depends_on: []
+    impacts: ["reinstall output over an existing database - bun test tests/install-shell.test.mjs"]
+    files: { create: [], modify: [scripts/installer/sh/db.sh, tests/install-shell.test.mjs, install.sh], test: [] }
+    idempotency_key: "F02:quiet-reinstall"
+    skip_if: "timeout 200 bun test --timeout 30000 tests/install-shell.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 200 bun test --timeout 30000 tests/install-shell.test.mjs"
+        expect_exit: 1
+        retry: 0
+      - cmd: "timeout 200 bun test --timeout 30000 tests/install-shell.test.mjs"
+        expect_exit: 0
+        retry: 1
+      - cmd: "bun scripts/installer/build.mjs --check --target sh"
+        expect_exit: 0
+        retry: 0
+  - id: F03
+    depends_on: []
+    impacts: ["Windows checksum lookup for -From and downloads - bun test tests/install-ps1-platform.test.mjs"]
+    files: { create: [], modify: [scripts/installer/ps1/fetch.ps1, tests/install-ps1-platform.test.mjs, install.ps1], test: [] }
+    idempotency_key: "F03:ps1-star-marker"
+    skip_if: "timeout 300 bun test --timeout 120000 tests/install-ps1-platform.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 300 bun test --timeout 120000 tests/install-ps1-platform.test.mjs"
+        expect_exit: 1
+        retry: 0
+      - cmd: "timeout 300 bun test --timeout 120000 tests/install-ps1-platform.test.mjs"
+        expect_exit: 0
+        retry: 1
+      - cmd: "bun scripts/installer/build.mjs --check --target ps1"
+        expect_exit: 0
+        retry: 0
+  - id: F04
+    depends_on: []
+    impacts: ["both MCP suites keep their test names and counts - bun test tests/install-mcp.test.mjs tests/install-ps1-mcp.test.mjs"]
+    files: { create: [tests/helpers/mcp-stubs.mjs], modify: [tests/install-mcp.test.mjs, tests/install-ps1-mcp.test.mjs], test: [] }
+    idempotency_key: "F04:dedupe-mcp-stubs"
+    skip_if: "timeout 400 bun test --timeout 120000 tests/install-mcp.test.mjs tests/install-ps1-mcp.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 400 bun test --timeout 120000 tests/install-mcp.test.mjs tests/install-ps1-mcp.test.mjs"
+        expect_exit: 0
+        retry: 1
+  - id: F05
+    depends_on: []
+    impacts: ["the shim symlink rule at shims.sh:38 - bun test tests/install-shims.test.mjs"]
+    files: { create: [], modify: [tests/install-shims.test.mjs], test: [] }
+    idempotency_key: "F05:pin-symlinked-shims"
+    skip_if: "timeout 200 bun test --timeout 30000 tests/install-shims.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 200 bun test --timeout 30000 tests/install-shims.test.mjs"
+        expect_exit: 0
+        retry: 1
 ---
 # Snipset CLI Install Coverage Plan
 
@@ -598,6 +671,11 @@ flowchart TD
     T20 --> T24
     T23 --> T25["T25 full local verification"]
     T24 --> T25
+    Sweep{{"Debt sweep: owner picked five"}} --> F01["F01 archive entry gaps"]
+    Sweep --> F02["F02 quiet reinstall message"]
+    Sweep --> F03["F03 ps1 star marker"]
+    Sweep --> F04["F04 dedupe MCP stubs"]
+    Sweep --> F05["F05 pin symlinked shims"]
     T25 -.-> Merge{{"Gate: human merges the PR"}}
     Merge -.-> Post["Post-merge gates: publish v0.2.0, winget PR, AUR push"]
 ```
@@ -658,8 +736,14 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] C11d VS Code add and check semantics for kept files (E1, E7). Evidence: nappy RED 3 fail reproducing E1 and E7, GREEN 74 pass; parent regenerated both bundles: 100 pass across six suites, no drift; commit `2e4801a`.
   - [x] README claim corrections (E2 to E6, E8 to E11, the tag note) and the matrix assertion (G3). Evidence: parent edits read against the reviewer's evidence; README suite 16 pass with the stronger assertion; em dash scan clean; commit `eeaf0ac`.
 - [x] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0. Evidence: see T25 (all exit 0 at `2e4801a`).
-- [ ] Deliver: commits staged by explicit path under the owner identity, no co-author trailer; PR body written to a file and opened with `--body-file`; `pr-registry.mjs pr install-coverage --number <N>`.
+- [x] Deliver: commits staged by explicit path under the owner identity, no co-author trailer; PR body written to a file and opened with `--body-file`; `pr-registry.mjs pr install-coverage --number <N>`. Evidence: 59 commits under the owner identity, attribution scan 0; `git push -u origin` exit 0; `gh pr create --body-file docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/pr.md` opened #6; `pr-registry.mjs pr install-coverage --number 6` recorded `open #6`; CI (author's evidence) green on both runs.
 - [ ] Sweep: session-close debt sweep, learning ledger, graph index, plan closeout decision.
+  - [x] Sweep question asked; the owner selected all five follow-ups (F01 to F05). Record: `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/debt-sweep.md`.
+  - [ ] F01 archive entry gaps
+  - [ ] F02 quiet reinstall message
+  - [ ] F03 ps1 star marker
+  - [ ] F04 dedupe MCP stubs
+  - [ ] F05 pin symlinked shims
 
 ## 1. Intent Lock (approved at Gate 1, 2026-10-12)
 
@@ -987,6 +1071,21 @@ Subagent rule for every wave: tests resolve the installer through `installerPath
 
 ### Task T25: Full local verification
 **Files:** none. **Behavior & Acceptance:** AC-16 via the nine `run[]` steps. **Evidence:** every exit code and pass count written into section 0.
+
+### Task F01: Archive entry gaps (debt sweep)
+**Files:** Modify `scripts/installer/sh/binary.sh`, `tests/install-archive.test.mjs`, `install.sh` (regenerated by the parent). **Behavior:** an archive member named exactly `..` or ending in `/..`, and any hard-link member (`h` in `tar -tv`), exit 1 before extraction with the install dir unchanged. **Owner:** `chef`.
+
+### Task F02: Quiet reinstall message (debt sweep)
+**Files:** Modify `scripts/installer/sh/db.sh`, `tests/install-shell.test.mjs`, `install.sh` (parent). **Behavior:** on a reinstall over an existing database the CLI's `schema mismatch ... pass --force` text is not relayed; the installer prints only its own note. **Owner:** `nappy`.
+
+### Task F03: ps1 star marker (debt sweep)
+**Files:** Modify `scripts/installer/ps1/fetch.ps1`, `tests/install-ps1-platform.test.mjs`, `install.ps1` (parent). **Behavior:** a `SHA256SUMS` line `<hex> *<zip>` is accepted for downloads and for `-From`, like `install.sh`. **Owner:** `hoggy`.
+
+### Task F04: Dedupe MCP test stubs (debt sweep)
+**Files:** Create `tests/helpers/mcp-stubs.mjs`; Modify `tests/install-mcp.test.mjs`, `tests/install-ps1-mcp.test.mjs`. **Behavior:** no behaviour change; both suites keep their test names and pass counts, and `tests/install-ps1-mcp.test.mjs` drops under 500 lines. **Owner:** `chef`.
+
+### Task F05: Pin symlinked shims (debt sweep)
+**Files:** Modify `tests/install-shims.test.mjs`. **Behavior:** a test proves uninstall keeps a symlink at a listed shim name (`shims.sh:38`); being a guard on existing behaviour, it is proven by a temporary mutation of that line in a private bundle instead of a RED run on HEAD. **Owner:** `nappy`.
 
 ## 6. Planning Record
 
