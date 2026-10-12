@@ -70,7 +70,7 @@ tasks:
   - id: T04
     depends_on: [T02]
     impacts: ["every feature part calls the lib.sh helpers and the stub names - rg -n 'report |act ' scripts/installer/sh", "README flag table - rg -n -- '--dry-run|--check|--uninstall|--update|--from|--with-mcp' README.md", "existing flag behaviour - bun test tests/install.test.mjs"]
-    files: { create: [tests/install-cli.test.mjs], modify: [scripts/installer/sh/args.sh, scripts/installer/sh/lib.sh, scripts/installer/sh/modes.sh, scripts/installer/sh/main.sh], test: [tests/install.test.mjs] }
+    files: { create: [tests/install-cli.test.mjs], modify: [scripts/installer/sh/args.sh, scripts/installer/sh/lib.sh, scripts/installer/sh/modes.sh, scripts/installer/sh/main.sh, scripts/installer/sh/platform.sh, scripts/installer/sh/fetch.sh, scripts/installer/sh/binary.sh, scripts/installer/sh/pathenv.sh, scripts/installer/sh/shell.sh, scripts/installer/sh/db.sh, scripts/installer/sh/shims.sh, scripts/installer/sh/mcp.sh], test: [tests/install.test.mjs] }
     idempotency_key: "T04:sh-cli-contract"
     skip_if: "timeout 120 bun test --timeout 30000 tests/install-cli.test.mjs"
     verify_exit: 0
@@ -418,7 +418,7 @@ tasks:
         expect_exit: 0
         retry: 0
   - id: T23
-    depends_on: [T12, T15, T18, T19, T20, T21, T22]
+    depends_on: [T12, T15, T18, T19, T20, T21, T22, T24]
     impacts: ["first-time users read the README install sections - bun test tests/readme-install.test.mjs", "opencode verify commands name installer checks - rg -n 'install' .opencode/commands/verify.md .opencode/commands/check-wiring.md"]
     files: { create: [tests/readme-install.test.mjs], modify: [README.md, .opencode/commands/check-wiring.md, .opencode/commands/verify.md], test: [] }
     idempotency_key: "T23:readme-install-matrix"
@@ -592,6 +592,7 @@ flowchart TD
     T20 --> T23
     T21 --> T23
     T22 --> T23
+    T24 --> T23
     T12 --> T24["T24 real-asset run"]
     T15 --> T24
     T20 --> T24
@@ -617,8 +618,8 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] Parent preflight: vendored schemas in `tests/fixtures/schemas/` (Scoop `schema.json`, winget 1.12.0 version, installer, defaultLocale) fetched with `gh api` and recorded in `tests/fixtures/schemas/SOURCES.md` with commit, sha256, and date; `SNIPSET_REAL_ASSETS` points at a `gh release download v0.2.0` directory whose `sha256sum -c SHA256SUMS` passes. Evidence: four `gh api -H 'Accept: application/vnd.github.raw'` fetches at Scoop `e6aa3b36` and winget-cli `3d9083c0`, each parsed by `jq -e`, digests and sizes in `SOURCES.md` (Scoop 22218 bytes, as the research note measured); `sha256sum -c SHA256SUMS` in `~/.cache/snipset-ic-assets.uPaOD2` exit 0 (both OK).
   - [x] T01 sandbox helper. Evidence: chef RED exit 1 (`Cannot find module`), GREEN 28 pass; parent rerun `timeout 120 bun test --timeout 30000 tests/install-sandbox.test.mjs tests/install.test.mjs` exit 0, 42 pass, 0 fail; guard and `installerPath` read; chef found the plan's "17 existing tests" wrong (the file has 14 Linux tests; 17 counted the 3 ps1 tests too), corrected in plan and contracts.
   - [x] T02 sh bundle and split. Evidence: chef RED exit 1 (11 fail), GREEN 26 pass; parent rerun of sandbox, build, install, winget suites exit 0 (70 pass); `build.mjs --check --target sh`, `shellcheck -S warning install.sh` exit 0; `git diff HEAD -- install.sh` shows only the notice, `note()` moved up, and the tool checks plus `target=` moved after path validation; parent fixed `installerPath` to fall back when a target has no `ORDER` (kept the ps1 sandbox test green between T02 and T03); commit `cc7b3f0`.
-  - [ ] T03 ps1 bundle and split
-  - [ ] T04 sh CLI contract
+  - [x] T03 ps1 bundle and split. Evidence: chef RED `--check --target ps1` exit 1 and 4 new tests failing; parent rerun of build, ps1, sandbox suites exit 0 (47 pass) after fixing the sh drift test that C04's move of the `Installed` line had made a no-op; `install.Tests.ps1` passes; `build.mjs --check` (all) exit 0; commit `ad65778`. Findings: `$script:` resolves to the caller's session in the scriptblock one-liner (measured), so no part uses it and C13 was amended; today's `-AddPath` joins two strings when the User Path holds one entry (`C:\aC:\b`), added to C15 as a regression case.
+  - [x] T04 sh CLI contract. Evidence: nappy RED 9 fail, GREEN 24 pass (14 existing plus 10); parent regenerated `install.sh` and reran cli, install, sandbox suites exit 0 (52 pass); `shellcheck -S warning` on the bundle and all parts exit 0; `modes.sh` read in full; commit `3d7ad73`.
   - [ ] T05 platform guards
   - [ ] T06 fetch fallbacks and offline
   - [ ] T07 smoke before replace
@@ -761,9 +762,10 @@ Owned by the parent. An item is checked only together with its evidence (command
 | W5 | T12 `hoggy`, T14 `chef`, T16 `nappy` | |
 | W6 | T15 `chef` | |
 | R2 | `staid` x2 | review wave 2 on Windows parts and manifests |
-| W7 | T23 `nappy`, T24 parent | T24 inline: it reads `SNIPSET_REAL_ASSETS` outside the worktree |
+| W7 | T24 parent | inline: it reads `SNIPSET_REAL_ASSETS` outside the worktree |
+| W8 | T23 `nappy` | after T24, so a README "verified" label can cite the real-asset run |
 | R3 | `staid` x3 | README claims, lifecycle, PR hygiene |
-| W8 | T25 parent | |
+| W9 | T25 parent | |
 
 Subagent rule for every wave: tests resolve the installer through `installerPath()` from the T01 helper, which builds a fresh bundle into a temp dir, so no chunk needs the committed `install.sh` or `install.ps1` to be current. Temp files are removed with `fs.rm` inside tests (shell `rm` is denied on this machine).
 
@@ -799,7 +801,7 @@ Subagent rule for every wave: tests resolve the installer through `installerPath
 - [ ] Steps: RED `build.mjs --check --target ps1` exit 1; implement; GREEN suites; `--check` exit 0; parent commits.
 
 ### Task T04: sh CLI contract
-**Files:** Create `tests/install-cli.test.mjs`; Modify `args.sh`, `lib.sh`, `modes.sh`, `main.sh` under `scripts/installer/sh/`.
+**Files:** Create `tests/install-cli.test.mjs`; Modify every part under `scripts/installer/sh/` except `ORDER` (`args.sh`, `lib.sh`, `modes.sh`, `main.sh` carry the new CLI; the other eight only turn today's top-level code into the named functions).
 **Interfaces:** Produces the Contract's Linux CLI, report lines, and every function name in the part table; `do_install` calls, in order, `platform_require`, `fetch_tools_require`, `fetch_resolve_version`, `fetch_release`, `binary_verify`, `binary_stage`, `binary_smoke`, `binary_place`, `pathenv_add`, `shell_bundle_place`, `shell_block_add`, `db_init`, `shims_generate`, `mcp_install`. Functions not yet implemented keep today's behaviour or report `[SKIP] <item>: not checked yet`.
 **Preconditions:** T02 parts exist.
 **Behavior & Acceptance:** AC-1 groundwork: `--help` lists every flag; unknown flag, two modes, a bad `--with-mcp` id, `--from` without a value each exit 2 with usage on stderr; `--dry-run` with no other flag reports `[DRY]` lines.
