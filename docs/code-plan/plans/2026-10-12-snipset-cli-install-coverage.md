@@ -532,7 +532,7 @@ tasks:
 | `modes.sh` | `do_install`, `do_check`, `do_update`, `do_uninstall` |
 | `main.sh` | `parse_args "$@"`, then dispatch on `mode` |
 
-**Windows CLI.** `install.ps1 [-Version V] [-InstallDir DIR] [-AddPath] [-WithMcp <string[]>] [-From DIR] [-DryRun] [-Check | -Update | -Uninstall]`, same exit codes and report lines. ps1 parts: `params.ps1` (CmdletBinding, param, comment help), `lib.ps1` (`Write-SnipsetReport`, `Invoke-SnipsetAction`), `platform.ps1` (`Get-SnipsetArchDecision -Arch -Wow -Build` pure, `Assert-SnipsetPlatform`), `fetch.ps1` (`Get-SnipsetRelease`, `-From` support), `binary.ps1` (`Test-SnipsetArchive`, `Test-SnipsetBinary -Path`, `Install-SnipsetBinary`, `Get-SnipsetInstalledVersion`), `path.ps1` (`Add-SnipsetPathEntry -Raw -Dir` and `Remove-SnipsetPathEntry -Raw -Dir` pure; `Get-SnipsetUserPath`/`Set-SnipsetUserPath` registry I/O with `DoNotExpandEnvironmentNames` and `ExpandString`), `mcp.ps1` (`Install-SnipsetMcp`, `Test-SnipsetMcp`, `Remove-SnipsetMcp`), `modes.ps1` (`Invoke-SnipsetInstall/Check/Update/Uninstall`), `main.ps1`. On a non-Windows host the script refuses unless `SNIPSET_INSTALL_ALLOW_NON_WINDOWS=1` (documented as the test switch); there the registry, smoke, and `Unblock-File` steps report `[SKIP]`, while their pure functions are unit-tested by dot-sourcing the parts.
+**Windows CLI.** `install.ps1 [-Version V] [-InstallDir DIR] [-AddPath] [-WithMcp <string[]>] [-From DIR] [-DryRun] [-Check | -Update | -Uninstall]`, same report lines. The script never calls `exit`: the documented one-liner runs it as a scriptblock inside the user's session, where `exit` would close that session. Usage errors, refusals, and drift `throw`, so `pwsh -File` exits 1 (there is no exit 2 on Windows). ps1 parts: `params.ps1` (CmdletBinding, param, comment help), `lib.ps1` (`Write-SnipsetReport`, `Invoke-SnipsetAction`), `platform.ps1` (`Get-SnipsetArchDecision -Arch -Wow -Build` pure, `Assert-SnipsetPlatform`), `fetch.ps1` (`Get-SnipsetRelease`, `-From` support), `binary.ps1` (`Test-SnipsetArchive`, `Test-SnipsetBinary -Path`, `Install-SnipsetBinary`, `Get-SnipsetInstalledVersion`), `path.ps1` (`Add-SnipsetPathEntry -Raw -Dir` and `Remove-SnipsetPathEntry -Raw -Dir` pure; `Get-SnipsetUserPath`/`Set-SnipsetUserPath` registry I/O with `DoNotExpandEnvironmentNames` and `ExpandString`), `mcp.ps1` (`Install-SnipsetMcp`, `Test-SnipsetMcp`, `Remove-SnipsetMcp`), `modes.ps1` (`Invoke-SnipsetInstall/Check/Update/Uninstall`), `main.ps1`. On a non-Windows host the script refuses unless `SNIPSET_INSTALL_ALLOW_NON_WINDOWS=1` (documented as the test switch); there the registry, smoke, and `Unblock-File` steps report `[SKIP]`, while their pure functions are unit-tested by dot-sourcing the parts.
 
 **MCP per harness** (research "MCP registration"): presence check first, then add; never overwrite; remove only an entry whose command is the installed binary path.
 
@@ -616,7 +616,7 @@ Owned by the parent. An item is checked only together with its evidence (command
 - [ ] Execute: every task in `tasks[]` reaches `[x]` with its own evidence, and `ultra-plan-runner.mjs <this plan> --execute` reports no `FAILED-*` row.
   - [x] Parent preflight: vendored schemas in `tests/fixtures/schemas/` (Scoop `schema.json`, winget 1.12.0 version, installer, defaultLocale) fetched with `gh api` and recorded in `tests/fixtures/schemas/SOURCES.md` with commit, sha256, and date; `SNIPSET_REAL_ASSETS` points at a `gh release download v0.2.0` directory whose `sha256sum -c SHA256SUMS` passes. Evidence: four `gh api -H 'Accept: application/vnd.github.raw'` fetches at Scoop `e6aa3b36` and winget-cli `3d9083c0`, each parsed by `jq -e`, digests and sizes in `SOURCES.md` (Scoop 22218 bytes, as the research note measured); `sha256sum -c SHA256SUMS` in `~/.cache/snipset-ic-assets.uPaOD2` exit 0 (both OK).
   - [x] T01 sandbox helper. Evidence: chef RED exit 1 (`Cannot find module`), GREEN 28 pass; parent rerun `timeout 120 bun test --timeout 30000 tests/install-sandbox.test.mjs tests/install.test.mjs` exit 0, 42 pass, 0 fail; guard and `installerPath` read; chef found the plan's "17 existing tests" wrong (the file has 14 Linux tests; 17 counted the 3 ps1 tests too), corrected in plan and contracts.
-  - [ ] T02 sh bundle and split
+  - [x] T02 sh bundle and split. Evidence: chef RED exit 1 (11 fail), GREEN 26 pass; parent rerun of sandbox, build, install, winget suites exit 0 (70 pass); `build.mjs --check --target sh`, `shellcheck -S warning install.sh` exit 0; `git diff HEAD -- install.sh` shows only the notice, `note()` moved up, and the tool checks plus `target=` moved after path validation; parent fixed `installerPath` to fall back when a target has no `ORDER` (kept the ps1 sandbox test green between T02 and T03); commit `cc7b3f0`.
   - [ ] T03 ps1 bundle and split
   - [ ] T04 sh CLI contract
   - [ ] T05 platform guards
@@ -632,11 +632,11 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] T15 ps1 path and lifecycle
   - [ ] T16 ps1 MCP
   - [x] T17 manifest renderer. Evidence: nappy RED exit 1 (24 fail, 1 pass on a fixture-only test), GREEN 25 pass; parent rerun exit 0, 25 pass, 0 fail; `render.mjs` (232 lines) read in full; `cmp packaging/SHA256SUMS` against the real Draft file: identical; commit `9b3ce1b`. Accepted deviations: `if`/`then` support (the Scoop schema uses it) and unknown schema keywords reported as errors, not ignored.
-  - [ ] T18 Scoop bucket
-  - [ ] T19 winget manifests
-  - [ ] T20 AUR package
-  - [ ] T21 Homebrew formula
-  - [ ] T22 Nix flake
+  - [x] T18 Scoop bucket. Evidence: nappy RED 11 fail, GREEN 11 pass; parent rerun exit 0; `render.mjs --check --channel scoop` exit 0; `bucket/` holds only `snipset.json`; commit `715dfd0`.
+  - [x] T19 winget manifests. Evidence: hoggy RED 16 fail, GREEN 16 pass, mutation (removed `NestedInstallerType`) turned 2 tests red; parent rerun exit 0; `--check --channel winget` exit 0; commit `4cb11e2`. Finding: the 1.12.0 schemas have no top-level `additionalProperties: false`, so the test asserts each field by name.
+  - [x] T20 AUR package. Evidence: chef RED 7 fail, GREEN 7 pass; a real `makepkg` build from a fixture tarball lists six paths with modes 0755/0644; `.SRCINFO` equals `makepkg --printsrcinfo` (`cmp`); parent rerun exit 0; PKGBUILD shellcheck exit 0; commit `06f706f`.
+  - [x] T21 Homebrew formula. Evidence: nappy RED 14 fail, GREEN 14 pass 1 skip (`ruby` absent); `license :cannot_represent` cited from docs.brew.sh Licence Guidelines and ARM refused with `Hardware::CPU.arm?` per the Formula Cookbook (both fetched 2026-10-12); parent rerun exit 0; commit `9653db2`.
+  - [x] T22 Nix flake. Evidence: hoggy RED 11 fail, GREEN 13 pass 1 skip; SRI cross-checked with an independent computation; parent gated `nix flake check` behind `SNIPSET_NIX_CHECK=1` (it needs network); `render.mjs --check` for all five channels exit 0; commit `b19fd43`.
   - [ ] T23 README and docs
   - [ ] T24 real-asset run
   - [ ] T25 full local verification
@@ -728,7 +728,7 @@ Owned by the parent. An item is checked only together with its evidence (command
 | AC-10 | `--with-mcp=all` prints one `[ADD]`, `[KEEP]`, or `[SKIP]` line per harness; an existing entry is never changed (stub CLI logs show no add call); uninstall removes only entries pointing at the installed binary; `-WithMcp` matches on Windows | T11, T16 | `tests/install-mcp.test.mjs`, `tests/install-ps1-mcp.test.mjs` |
 | AC-11 | `install.ps1` `-DryRun`, `-Check`, `-Update`, `-Uninstall`, `-From` pass under pwsh 7.6.6 here; the architecture decision table and the path-entry functions (which keep `%VAR%` entries unexpanded) pass by dot-sourcing; registry, smoke, and Windows itself are labelled not verified | T13 to T16 | the four `install-ps1-*` suites |
 | AC-12 | committed `install.sh` and `install.ps1` equal the build output; every part passes `bash -n` or the PowerShell parser | T02, T03 | `tests/installer-build.test.mjs` |
-| AC-13 | `render.mjs --check` exit 0; Scoop and winget keys pass the vendored schemas; `.SRCINFO` equals `makepkg --printsrcinfo`; a makepkg build from a fixture tarball installs `/usr/bin/snipset`, `snipset.bash`, and the license; Homebrew and Nix outputs carry the right URL, hash, and SRI | T17 to T22 | the `packaging-*` suites |
+| AC-13 | `render.mjs --check` exit 0; Scoop and winget keys pass the vendored schemas; `.SRCINFO` equals `makepkg --printsrcinfo`; a makepkg build from a fixture tarball installs `/usr/bin/snipset`, `/usr/bin/snipset-shims`, `snipset.bash`, the two shell files, and the license; Homebrew and Nix outputs carry the right URL, hash, and SRI | T17 to T22 | the `packaging-*` suites |
 | AC-14 | with `SNIPSET_REAL_ASSETS` set: `install.sh --from` installs the real v0.2.0 binary in a temp HOME and it prints `snipset 0.2.0`; `install.ps1 -From` places a `snipset.exe` whose sha256 matches the zip entry; makepkg builds from the real tarball | T24 | `tests/install-real-assets.test.mjs` |
 | AC-15 | README has a channel matrix (install.sh, install.ps1, offline, Scoop, winget, AUR, Homebrew, Nix, mise, eget, ubi, gh) where every status says verified with its evidence or not verified with its reason; every installer flag and parameter is documented; the Draft caveat is stated; `README.md:99` is fixed; `.opencode/commands/check-wiring.md` and `verify.md` match the new installer; no em dash | T23 | `tests/readme-install.test.mjs` |
 | AC-16 | full suite in both PATH modes, bundle and render drift checks, ShellCheck, `bash -n`, em dash and attribution scans all exit 0 | T25 | T25 `run[]` |
@@ -878,7 +878,7 @@ Subagent rule for every wave: tests resolve the installer through `installerPath
 
 ### Task T13: ps1 CLI contract
 **Files:** Create `tests/install-ps1-cli.test.mjs`; Modify `params.ps1`, `lib.ps1`, `modes.ps1`, `main.ps1` under `scripts/installer/ps1/`.
-**Interfaces:** the Contract's Windows CLI and function names; `-WithMcp` is `[string[]]` (vivera T24b lesson: an array binds); two modes exit 2; `Get-Help ./install.ps1` shows every parameter.
+**Interfaces:** the Contract's Windows CLI and function names; `-WithMcp` is `[string[]]` (vivera T24b lesson: an array binds); two modes throw (exit 1 under `pwsh -File`, never `exit`); `Get-Help ./install.ps1` shows every parameter.
 **Preconditions:** `pwsh --version` exit 0 (else the RED step would skip and pass).
 **Behavior & Acceptance:** AC-11 groundwork.
 **Edge Cases:** `-WithMcp all`; unknown id exits 2.
