@@ -58,6 +58,6 @@ Facts measured this session that belong to the machine, not to this repository:
 | Item | Destination | Why | Approval |
 |---|---|---|---|
 | Rules 1 to 6 and 9 | in-repo `MEMORY.md` (auto) | rules 2, 3, 4, 6 are specific to this repository; 1 and 5 are general but were measured here first | not required |
-| F1 (TinyFish six parameters) | `~/AGENTS.md` correction of the "TinyFish fetch_content" block | machine-wide; the global note is now wrong | asked separately (header `Promote`) |
-| F2 (vivera copy-rules root) | `~/AGENTS.md` candidate | applies to every repository that borrows vivera's scripts | asked separately (header `Promote`) |
+| F1 (TinyFish six parameters) | `~/AGENTS.md` correction of the "TinyFish fetch_content" block | machine-wide; the global note was wrong (live schema `required` re-read 2026-10-12) | approved 2026-10-12 (`Promote`); applied, backup `~/AGENTS.md.bak-20261012-tinyfish-iframe` |
+| F2 (vivera copy-rules root) | `~/AGENTS.md` block with rule A27 | applies to every repository that borrows vivera's scripts (`check-copy-rules.mjs:55` and `mainDiff` re-read 2026-10-12) | approved 2026-10-12 (`Promote`); appended, backup `~/AGENTS.md.bak-20261012-copy-rules-root` |
 | F3 (scratch with rm denied) | none | a property of the current permission setting, recorded in `~/AGENTS.md` already | not required |
