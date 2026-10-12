@@ -71,16 +71,23 @@ bash scripts/snipset-live.sh --json snippet search "query"
 bash scripts/snipset-live.sh --refresh snippet get <uuid>
 ```
 
-Reads (`snippet list/get/search/expand`, `group list`, `stats`, `clipboard`,
-`audio`, `reference`) use the snapshot in `$SNIPSET_LIVE_SNAPSHOT_DIR`
-(default `/tmp/snipset-live`). `snippet expand` is a read and never touches
-the live file. Writes (`snippet add/update/delete`, anything
-else) target the live database, but only after `snipset doctor` proves it is
-reachable. If the wrapper refuses a write, close Snipset Desktop and retry.
+Only these commands are reads: `snippet list/get/search/expand`, `group list`,
+every `stats` command, `reference list`, `clipboard list/get/search/export`,
+`clipboard tag list`, `audio history list/get`, `audio dictionary list`,
+`audio tts list`, and `audio stats`. Reads use the snapshot in
+`$SNIPSET_LIVE_SNAPSHOT_DIR` (default `${TMPDIR:-/tmp}/snipset-live-<uid>`,
+where `<uid>` is your numeric user id). `snippet expand` is a read and never
+touches the live file. Every other command is a write, including
+`snippet add/update/delete` and the clipboard and audio commands that change
+data. Writes target the live database, but only after `snipset doctor` proves
+it is reachable. If the wrapper refuses a write, close Snipset Desktop and
+retry.
 
-The snapshot is refreshed when it is missing, when `--refresh` is passed, or
-when the live database is newer than the snapshot (stale copy). Use
-`--refresh` to force a fresh copy, `--live-db PATH` instead of
+Before each command, the wrapper refreshes the snapshot when `--refresh` is
+passed, when the snapshot is missing, or when the live database or its `-wal`
+file is newer than the snapshot. Every refresh copies the whole live database,
+plus its `-wal` and `-shm` files when they exist, into the snapshot directory.
+Use `--refresh` to force a fresh copy, `--live-db PATH` instead of
 `SNIPSET_LIVE_DB`, and `--snapshot-dir DIR` instead of
 `SNIPSET_LIVE_SNAPSHOT_DIR`. Pass `--` before the snipset command when args
 could look like wrapper flags. The wrapper owns `--db` (snapshot for reads,
