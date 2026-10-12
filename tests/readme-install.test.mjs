@@ -59,7 +59,7 @@ describe("README install coverage", () => {
     const block = read("install.ps1").match(/^param\(\n([\s\S]*?)\n\)/m);
     expect(block).not.toBeNull();
     const params = [...block[1].matchAll(/\$(\w+)/g)].map((match) => match[1]);
-    expect(params.length).toBe(9);
+    expect(params.length).toBe(10);
     const rows = tableRows(readme);
     const missing = params.filter((name) => !rows.some((row) => row.includes("`-" + name)));
     expect(missing).toEqual([]);
@@ -192,4 +192,51 @@ describe("no em dash", () => {
       expect(read(path).includes(EM_DASH)).toBe(false);
     });
   }
+});
+
+describe("deferred hardening notes", () => {
+  test("deferred hardening: Homebrew states the host libcrypto.so.3 and glibc 2.34 it relies on", () => {
+    const text = section("Package managers");
+    expect(text).toContain("libcrypto.so.3");
+    expect(text).toContain("glibc 2.34");
+    expect(text).toContain("keg-only");
+    expect(readme).toContain("- The Homebrew formula relies on the host's `libcrypto.so.3` (OpenSSL 3) and glibc 2.34 or newer.");
+  });
+
+  test("deferred hardening: the Windows notes name the two DLLs the zip does not ship", () => {
+    const text = section("Windows x64");
+    expect(text).toContain("`libcrypto-3-x64.dll`");
+    expect(text).toContain("`VCRUNTIME140.dll`");
+    expect(section("Known limits")).toContain("`libcrypto-3-x64.dll` and `VCRUNTIME140.dll`");
+    // The installer's own message sends the reader here.
+    expect(read("scripts/installer/ps1/binary.ps1")).toContain("see the README Windows notes");
+  });
+
+  test("deferred hardening: -Database is documented and -Db is explained", () => {
+    const row = tableRows(section("Windows x64")).find((line) => cells(line)[0] === "`-Database`");
+    expect(row).toBeDefined();
+    expect(row).toContain("--db");
+    expect(row).toContain("-Debug");
+    expect(read("scripts/installer/ps1/params.ps1")).toContain("[string]$Database");
+  });
+
+  test("deferred hardening: kept share files and the share-dir manifest are described", () => {
+    const text = section("Check, update, uninstall, dry run");
+    expect(text).toContain("`<share-dir>/.snipset-bundle`");
+    expect(text).toContain("`[KEEP]`");
+    expect(text).toContain("the bashrc block is not added");
+  });
+
+  test("deferred hardening: uninstall removes only the empty directories the install created", () => {
+    const text = section("Check, update, uninstall, dry run");
+    expect(text).toContain("`<install-dir>/.snipset-dirs`");
+    expect(readme).not.toContain("Empty directories may remain after uninstall");
+    expect(section("Known limits")).not.toContain("Uninstall may leave empty directories (for example `~/.local/bin`");
+  });
+
+  test("deferred hardening: in-use asides on Windows are cleaned up", () => {
+    const text = section("Windows x64");
+    expect(text).toContain("`snipset.exe.old-<pid>-<8 hex>`");
+    expect(text).toContain("Parameters are named only");
+  });
 });
