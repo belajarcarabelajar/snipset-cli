@@ -646,7 +646,8 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] C12b safe startup-file rewrites and keeps (fixes A1, A7 to A10). Evidence: chef reproduced the P0 on HEAD (`.profile` and `.bashrc` 2224 to 0 bytes, `[REMOVED]`, exit 0), RED 8 fail, GREEN 84 pass; same repro on the fix: user content byte-identical, no temp or backup files left; parent bundle 164 pass across eleven Linux suites, shellcheck exit 0, no drift; commit `d09d57f`.
   - [x] C06b archive and fetch hardening (fixes B1 to B7, B9). Evidence: chef RED 6 fail on HEAD (fakeroot reproduced `4242:4242`), GREEN 147 pass; eight guard reverts each turned `install-archive` red; parent regenerated `install.sh` and ran thirteen Linux suites: 191 pass, 0 fail; real-asset suite 4 pass; shellcheck exit 0; `build.mjs --check` exit 0; commit `0196143`. Debt noted by chef: entries named exactly `..` or ending `/..`, hard-link members, and the `.-*` pattern are not refused.
   - [x] C16b ps1 MCP scope-safe removal (A3, A4 parity with C11b). Evidence: nappy RED 6 fail on HEAD's `mcp.ps1`, GREEN 20 pass; parent private bundle 55 pass across four ps1 suites; commit `2950d24`.
-  - [ ] Review wave 2 (after W6): independent read-only review of the Windows parts and the manifests.
+  - [ ] Review wave 2 (after W6): independent read-only review of the Windows parts and the manifests. Findings in `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/review-wave-2.md`.
+  - [ ] C17b packaging P3 fixes (D1 to D4)
   - [ ] Review wave 3 (before the PR): README claim check, lifecycle state machine, PR hygiene.
 - [ ] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0.
 - [ ] Deliver: commits staged by explicit path under the owner identity, no co-author trailer; PR body written to a file and opened with `--body-file`; `pr-registry.mjs pr install-coverage --number <N>`.
