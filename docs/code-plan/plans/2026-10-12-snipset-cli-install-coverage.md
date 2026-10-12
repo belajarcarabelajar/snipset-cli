@@ -740,7 +740,7 @@ Owned by the parent. An item is checked only together with its evidence (command
 - [ ] Sweep: session-close debt sweep, learning ledger, graph index, plan closeout decision.
   - [x] Sweep question asked; the owner selected all five follow-ups (F01 to F05). Record: `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/debt-sweep.md`.
   - [ ] F01 archive entry gaps
-  - [ ] F02 quiet reinstall message
+  - [x] F02 quiet reinstall message. Evidence: RED on a HEAD bundle exit 1 (0 pass, 2 fail: the stub's raw `already exists` line relayed, and a `Permission denied` line relayed without the installer prefix); GREEN on HEAD plus `db.sh`: `bun test tests/install-shell.test.mjs tests/install.test.mjs tests/install-lifecycle.test.mjs` all pass; `bash -n` and `shellcheck -S warning` exit 0.
   - [ ] F03 ps1 star marker
   - [ ] F04 dedupe MCP stubs
   - [x] F05 pin symlinked shims. Evidence: `bun test tests/install-shims.test.mjs` exit 0, 10 pass; mutation (line 38 without `! -L`, private bundle) exit 1, 9 pass 1 fail, the new test failing with `ENOENT lstat .../,k1`.
