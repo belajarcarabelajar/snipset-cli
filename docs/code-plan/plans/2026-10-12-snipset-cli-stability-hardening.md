@@ -1,7 +1,7 @@
 ---
 schema: ultra-plan/v1
 plan_id: 2026-10-12-snipset-cli-stability-hardening
-status: Verification
+status: Complete
 version: 1
 runner_contract: true
 defaults:
@@ -137,6 +137,45 @@ tasks:
       - cmd: "bash -n scripts/snipset-live.sh"
         expect_exit: 0
         retry: 0
+  - id: F1
+    depends_on: [T8]
+    impacts: ["Windows PowerShell 5.1 installs - env POWERSHELL_TELEMETRY_OPTOUT=1 pwsh -NoProfile -File tests/install.Tests.ps1", "PowerShell 7 installer run - bun test tests/install-ps1.test.mjs"]
+    files: { create: [], modify: [install.ps1, tests/install.Tests.ps1], test: [tests/install.Tests.ps1, tests/install-ps1.test.mjs] }
+    idempotency_key: "F1:zipfile-assembly-load"
+    skip_if: "env POWERSHELL_TELEMETRY_OPTOUT=1 pwsh -NoProfile -Command 'if ((Get-Content -Raw install.ps1) -notmatch [regex]::Escape(\"Add-Type -AssemblyName System.IO.Compression.FileSystem\")) { exit 1 }; & ./tests/install.Tests.ps1'"
+    verify_exit: 0
+    run:
+      - cmd: "env POWERSHELL_TELEMETRY_OPTOUT=1 pwsh -NoProfile -File tests/install.Tests.ps1"
+        expect_exit: 0
+        retry: 0
+      - cmd: "bun test tests/install-ps1.test.mjs"
+        expect_exit: 0
+        retry: 1
+  - id: F2
+    depends_on: [T8]
+    impacts: ["snipset-live read allowlist versus the installed CLI - bun test tests/snipset-live-cli-drift.test.mjs"]
+    files: { create: [tests/snipset-live-cli-drift.test.mjs], modify: [], test: [tests/snipset-live-cli-drift.test.mjs] }
+    idempotency_key: "F2:cli-drift-guard"
+    skip_if: "bun test tests/snipset-live-cli-drift.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "bun test tests/snipset-live-cli-drift.test.mjs"
+        expect_exit: 0
+        retry: 1
+  - id: F3
+    depends_on: [T8]
+    impacts: ["install.sh lint at default severity - shellcheck install.sh", "installer behavior - bun test tests/install.test.mjs"]
+    files: { create: [], modify: [install.sh], test: [tests/install.test.mjs] }
+    idempotency_key: "F3:shellcheck-notes"
+    skip_if: "shellcheck install.sh"
+    verify_exit: 0
+    run:
+      - cmd: "shellcheck install.sh"
+        expect_exit: 0
+        retry: 0
+      - cmd: "bun test tests/install.test.mjs"
+        expect_exit: 0
+        retry: 1
 ---
 # Snipset CLI Stability Hardening Plan
 
@@ -162,8 +201,12 @@ Owned by the parent. An item is checked only together with its evidence (command
 - [x] T6 pwsh 7.6.6 user-local. Evidence: `gh release download v7.6.6 -R PowerShell/PowerShell` into `~/.cache/pwsh-download/v7.6.6.T2CzEg/`; size 75876271 and sha256 `ddbc4a2d...f103bc` equal the release API digest; 0 absolute, `..`, or symlink entries; extracted to `~/.local/opt/powershell/7.6.6`, linked `~/.local/bin/pwsh`; plan T6 command exit 0 (`7.6.6`). Telemetry: Microsoft about_Telemetry (updated 2026-05-27, read 2026-10-12) says startup telemetry is sent unless `POWERSHELL_TELEMETRY_OPTOUT` is set, so every plan command sets it.
 - [x] T7 install.ps1 Dispose plus Linux run. Evidence (parent rerun, telemetry opted out): contract against the original `install.ps1` exit 1, with the change exit 0; `bun test tests/install-ps1.test.mjs` exit 0 (2 pass); the subagent also showed the test goes red when the temp cleanup, stage cleanup, or checksum throw is removed. Commit `d910b56`. Boundary: Linux cannot show the leaked handle itself.
 - [x] T8 session verification. Evidence (fresh, after the review fixes): `bun test tests/` exit 0 (104 pass, 0 fail); PATH without `snipset` and `pwsh` exit 0 (84 pass, 20 skip, 0 fail, 2 reason lines); `shellcheck -S warning install.sh scripts/snipset-live.sh` exit 0; `bash -n` on both exit 0; `pwsh -NoProfile -File tests/install.Tests.ps1` exit 0; runner `--execute` exit 0 with an empty error ledger. Diff audit: 14 planned paths only; em dash and attribution scans 0. Independent review (`staid`): `correct`, one [P3] finding fixed in `bed3b6e` (contract check now runs in `bun test`; red without the `Dispose` line) and one observation fixed in `1feb6fa` (wrapper header comment). Report: `docs/code-plan/sessions/2026-10-12-snipset-cli-stability-hardening/review.md`.
-- [ ] Deliver: commits by explicit path, PR opened with body file, registry `pr` recorded, state `open`.
-- [ ] Sweep: Step 6 debt sweep, learning ledger, graph index, final issue sync after `Complete`.
+- [x] Deliver. Evidence: 9 commits staged by explicit path under the repository owner identity, no co-author trailer; `git push -u origin <branch>` exit 0; `gh pr create --body-file docs/code-plan/sessions/2026-10-12-snipset-cli-stability-hardening/pr.md` exit 0, PR #4; `pr-registry.mjs pr stability-hardening --number 4` exit 0, state `open`; PR head `c2a9893`, `MERGEABLE`.
+- [x] Debt sweep harvest and question. Evidence: 10 debts recorded in `docs/code-plan/sessions/2026-10-12-snipset-cli-stability-hardening/debt-sweep.md` (4 NOW, 6 LATER with `defer:`); learning ledger written, 5 KEEP rules in `MEMORY.md`; owner selected D1, D2, D3 on 2026-10-12. (+3 follow-up items below)
+- [x] F1 load the ZipFile assembly before `OpenRead`. Evidence (parent): PowerShell 7 probe `Add-Type -AssemblyName System.IO.Compression.FileSystem` exit 0; with the line removed `bun test tests/install-ps1.test.mjs` exit 1 (2 pass, 1 fail), with it exit 0 (3 pass). Commit `ab99c80`. Windows PowerShell 5.1 runtime still unverified (D7).
+- [x] F2 CLI drift guard. Evidence (parent): `bun test tests/snipset-live-cli-drift.test.mjs` exit 0 (10 pass); mutation `set-color` renamed in the table exit 1 naming `set-color`, restored byte-identical (`cmp`), exit 0; without the binary exit 0 (10 skip). Commit `524cd8a`.
+- [x] F3 ShellCheck notes. Evidence (parent): `shellcheck install.sh` exit 1 before (SC1003 at 65:35, SC2016 at 128, 174, 176), exit 0 after; 0 non-comment lines changed; `bun test tests/install.test.mjs` exit 0 (14 pass). Commit `aa26e5d`.
+- [x] Sweep close: plan closeout decision. Evidence: `bun ~/vivera/scripts/plan-closeout.mjs --readiness <this plan>` exit 3, verdict `NEEDS-HUMAN` (T1, T2, T4 to T7, F1 to F3 `DONE`; T3 and T8 `UNPROVEN` because their `skip_if` is the `false` sentinel; 0 open NOW follow-ups); runner `--execute` on the same state exit 0 with T3 and T8 `PASSED`; owner answered `Mark Complete` on 2026-10-12. The graph index and the final mirror and issue sync run after this commit and are recorded in `docs/code-plan/sessions/2026-10-12-snipset-cli-stability-hardening/debt-sweep.md`.
 
 ## 1. Intent & Scope
 
@@ -197,6 +240,9 @@ flowchart TD
     T7 --> T8
     T8 --> Review{{"Parent diff audit and staid review"}}
     Review --> Deliver(["PR opened and registered"])
+    T8 --> F1["F1 load ZipFile assembly for PS 5.1"]
+    T8 --> F2["F2 CLI drift guard test"]
+    T8 --> F3["F3 ShellCheck notes in install.sh"]
 ```
 
 ## 3. Reasoning Lenses
@@ -239,8 +285,8 @@ flowchart TD
 - Produces: unchanged CLI; the internal `is_read` decision now uses up to three positional words (`cmd`, `sub`, `action`).
 
 **Preconditions:**
-- [ ] `bun --version` exits 0 (else `E_PRECOND_DEP`).
-- [ ] `scripts/snipset-live.sh` exists in the worktree (else `E_PRECOND_INPUT`).
+- [x] `bun --version` exits 0 (else `E_PRECOND_DEP`).
+- [x] `scripts/snipset-live.sh` exists in the worktree (else `E_PRECOND_INPUT`).
 
 **Idempotency Check:** skip when `bun test tests/snipset-live-routing.test.mjs` exits 0.
 
@@ -258,11 +304,11 @@ flowchart TD
 
 **Test Data & Determinism:** temporary directory per test, stub binary on PATH, no real database, cleanup in `finally`.
 
-- [ ] Step 1: Write `tests/snipset-live-routing.test.mjs` with the read and write matrices from AC-1 and AC-2, reusing the stub pattern from `tests/snipset-live.test.mjs`.
-- [ ] Step 2: Run, verify fail | cmd: `bun test tests/snipset-live-routing.test.mjs` | expect: exit 1 | retry: 0 | on_fail: n/a
-- [ ] Step 3: Replace the `is_read` case in `scripts/snipset-live.sh` with the three-word allowlist.
-- [ ] Step 4: Run, verify pass | cmd: `bun test tests/snipset-live-routing.test.mjs tests/snipset-live.test.mjs tests/snipset-live-hardening.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED, halt T2 and T3 only
-- [ ] Step 5: Parent commits by explicit path.
+- [x] Step 1: Write `tests/snipset-live-routing.test.mjs` with the read and write matrices from AC-1 and AC-2, reusing the stub pattern from `tests/snipset-live.test.mjs`.
+- [x] Step 2: Run, verify fail | cmd: `bun test tests/snipset-live-routing.test.mjs` | expect: exit 1 | retry: 0 | on_fail: n/a
+- [x] Step 3: Replace the `is_read` case in `scripts/snipset-live.sh` with the three-word allowlist.
+- [x] Step 4: Run, verify pass | cmd: `bun test tests/snipset-live-routing.test.mjs tests/snipset-live.test.mjs tests/snipset-live-hardening.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED, halt T2 and T3 only
+- [x] Step 5: Parent commits by explicit path.
 
 ### Task T2: WAL-aware snapshot staleness
 
@@ -274,7 +320,7 @@ flowchart TD
 **Interfaces:** Consumes the T1 version of the script. Produces an unchanged CLI.
 
 **Preconditions:**
-- [ ] T1 integrated in the worktree (else `E_PRECOND_UPSTREAM`).
+- [x] T1 integrated in the worktree (else `E_PRECOND_UPSTREAM`).
 
 **Idempotency Check:** skip when `bun test tests/snipset-live-snapshot.test.mjs` exits 0.
 
@@ -292,11 +338,11 @@ flowchart TD
 
 **Test Data & Determinism:** plain files with fixed contents and explicit mtimes; no SQLite needed.
 
-- [ ] Step 1: Write the failing test.
-- [ ] Step 2: Run, verify fail | cmd: `bun test tests/snipset-live-snapshot.test.mjs` | expect: exit 1 | retry: 0 | on_fail: n/a
-- [ ] Step 3: Extend the refresh condition.
-- [ ] Step 4: Run, verify pass | cmd: `bun test tests/snipset-live-snapshot.test.mjs tests/snipset-live-routing.test.mjs tests/snipset-live.test.mjs tests/snipset-live-hardening.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED, halt T3 only
-- [ ] Step 5: Parent commits by explicit path.
+- [x] Step 1: Write the failing test.
+- [x] Step 2: Run, verify fail | cmd: `bun test tests/snipset-live-snapshot.test.mjs` | expect: exit 1 | retry: 0 | on_fail: n/a
+- [x] Step 3: Extend the refresh condition.
+- [x] Step 4: Run, verify pass | cmd: `bun test tests/snipset-live-snapshot.test.mjs tests/snipset-live-routing.test.mjs tests/snipset-live.test.mjs tests/snipset-live-hardening.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED, halt T3 only
+- [x] Step 5: Parent commits by explicit path.
 
 ### Task T3: README wrapper contract
 
@@ -306,7 +352,7 @@ flowchart TD
 **Interfaces:** documents the T1 allowlist and the T2 staleness rule.
 
 **Preconditions:**
-- [ ] T1 and T2 integrated (else `E_PRECOND_UPSTREAM`).
+- [x] T1 and T2 integrated (else `E_PRECOND_UPSTREAM`).
 
 **Idempotency Check:** `skip_if: "false"` (documentation, reviewed by diff).
 
@@ -324,9 +370,9 @@ flowchart TD
 
 **Test Data & Determinism:** N/A.
 
-- [ ] Step 1: Edit the section.
-- [ ] Step 2: Run | cmd: `bash -c '! rg -n --max-columns=0 "\x{2014}" README.md .opencode/commands/snipset-live.md'` | expect: exit 0 | retry: 0 | on_fail: remove the em dash
-- [ ] Step 3: Parent commits by explicit path.
+- [x] Step 1: Edit the section.
+- [x] Step 2: Run | cmd: `bash -c '! rg -n --max-columns=0 "\x{2014}" README.md .opencode/commands/snipset-live.md'` | expect: exit 0 | retry: 0 | on_fail: remove the em dash
+- [x] Step 3: Parent commits by explicit path.
 
 ### Task T4: Binary-dependent tests skip with a reason
 
@@ -337,7 +383,7 @@ flowchart TD
 **Interfaces:** Produces `export const snipsetSkip` (string reason or `false`).
 
 **Preconditions:**
-- [ ] `bun --version` exits 0.
+- [x] `bun --version` exits 0.
 
 **Idempotency Check:** skip when the PATH-override run of `bun test tests/` exits 0.
 
@@ -355,11 +401,11 @@ flowchart TD
 
 **Test Data & Determinism:** unchanged fixtures.
 
-- [ ] Step 1: Observe RED | cmd: PATH-override run of the three files | expect: exit 1 | retry: 0 | on_fail: n/a
-- [ ] Step 2: Add the helper and the skip options.
-- [ ] Step 3: Run without binary | expect: exit 0 | retry: 0 | on_fail: mark FAILED-ISOLATED
-- [ ] Step 4: Run with binary | cmd: `bun test tests/dummy-db.test.mjs tests/pentest-core.test.mjs tests/pentest-aux.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED-ISOLATED
-- [ ] Step 5: Parent commits by explicit path.
+- [x] Step 1: Observe RED | cmd: PATH-override run of the three files | expect: exit 1 | retry: 0 | on_fail: n/a
+- [x] Step 2: Add the helper and the skip options.
+- [x] Step 3: Run without binary | expect: exit 0 | retry: 0 | on_fail: mark FAILED-ISOLATED
+- [x] Step 4: Run with binary | cmd: `bun test tests/dummy-db.test.mjs tests/pentest-core.test.mjs tests/pentest-aux.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED-ISOLATED
+- [x] Step 5: Parent commits by explicit path.
 
 ### Task T5: install.sh curl retry and stall limits
 
@@ -369,7 +415,7 @@ flowchart TD
 **Interfaces:** unchanged installer CLI. Internal: one `curl_opts` array shared by the three calls.
 
 **Preconditions:**
-- [ ] `shellcheck --version` exits 0.
+- [x] `shellcheck --version` exits 0.
 
 **Idempotency Check:** skip when `bun test tests/install.test.mjs -t 'curl calls carry retry and stall limits'` exits 0 (Bun exits 1 when the filter matches no test, measured 2026-10-12).
 
@@ -387,12 +433,12 @@ flowchart TD
 
 **Test Data & Determinism:** existing fixture archive and checksums.
 
-- [ ] Step 1: Write the failing test.
-- [ ] Step 2: Run, verify fail | cmd: `bun test tests/install.test.mjs -t 'curl calls carry retry and stall limits'` | expect: exit 1 | retry: 0 | on_fail: n/a
-- [ ] Step 3: Add `curl_opts` and use it in the three calls.
-- [ ] Step 4: Run, verify pass | cmd: `bun test tests/install.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED-ISOLATED
-- [ ] Step 5: Run | cmd: `shellcheck -S warning install.sh` | expect: exit 0 | retry: 0
-- [ ] Step 6: Parent commits by explicit path.
+- [x] Step 1: Write the failing test.
+- [x] Step 2: Run, verify fail | cmd: `bun test tests/install.test.mjs -t 'curl calls carry retry and stall limits'` | expect: exit 1 | retry: 0 | on_fail: n/a
+- [x] Step 3: Add `curl_opts` and use it in the three calls.
+- [x] Step 4: Run, verify pass | cmd: `bun test tests/install.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED-ISOLATED
+- [x] Step 5: Run | cmd: `shellcheck -S warning install.sh` | expect: exit 0 | retry: 0
+- [x] Step 6: Parent commits by explicit path.
 
 ### Task T6: PowerShell 7.6.6 user-local install
 
@@ -401,8 +447,8 @@ flowchart TD
 **Interfaces:** Produces `pwsh` on PATH for T7.
 
 **Preconditions:**
-- [ ] `~/.local/bin` is on PATH (`command -v snipset` resolves there).
-- [ ] At least 300 MB free on `/home` (`df -h ~`); the tarball is not downloaded to `/tmp` (tmpfs).
+- [x] `~/.local/bin` is on PATH (`command -v snipset` resolves there).
+- [x] At least 300 MB free on `/home` (`df -h ~`); the tarball is not downloaded to `/tmp` (tmpfs).
 
 **Idempotency Check:** skip when `pwsh` reports version 7.6.6.
 
@@ -423,9 +469,9 @@ flowchart TD
 
 **Test Data & Determinism:** pinned version and digest.
 
-- [ ] Step 1: Download and verify the checksum.
-- [ ] Step 2: Extract and link.
-- [ ] Step 3: Run | cmd: version check | expect: exit 0 | retry: 0 | on_fail: mark FAILED-BLOCKING for T7
+- [x] Step 1: Download and verify the checksum.
+- [x] Step 2: Extract and link.
+- [x] Step 3: Run | cmd: version check | expect: exit 0 | retry: 0 | on_fail: mark FAILED-BLOCKING for T7
 
 ### Task T7: install.ps1 Dispose and Linux run
 
@@ -436,7 +482,7 @@ flowchart TD
 **Interfaces:** unchanged installer parameters `-Version`, `-InstallDir`, `-AddPath`, env `SNIPSET_RELEASE_BASE_URL`.
 
 **Preconditions:**
-- [ ] T6 done: `pwsh` 7.6.6 on PATH (else `E_PRECOND_UPSTREAM`).
+- [x] T6 done: `pwsh` 7.6.6 on PATH (else `E_PRECOND_UPSTREAM`).
 
 **Idempotency Check:** skip when `bun test tests/install-ps1.test.mjs` exits 0.
 
@@ -454,12 +500,12 @@ flowchart TD
 
 **Test Data & Determinism:** ephemeral port, temporary directories, server stopped in `finally`.
 
-- [ ] Step 1: Add `Dispose` to the contract list.
-- [ ] Step 2: Run, verify fail | cmd: `pwsh -NoProfile -File tests/install.Tests.ps1` | expect: exit 1 | retry: 0 | on_fail: n/a
-- [ ] Step 3: Wrap entry validation in `try { } finally { $zipArchive.Dispose() }`.
-- [ ] Step 4: Run | cmd: `pwsh -NoProfile -File tests/install.Tests.ps1` | expect: exit 0 | retry: 0
-- [ ] Step 5: Write `tests/install-ps1.test.mjs` and run | cmd: `bun test tests/install-ps1.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED-ISOLATED
-- [ ] Step 6: Parent commits by explicit path.
+- [x] Step 1: Add `Dispose` to the contract list.
+- [x] Step 2: Run, verify fail | cmd: `pwsh -NoProfile -File tests/install.Tests.ps1` | expect: exit 1 | retry: 0 | on_fail: n/a
+- [x] Step 3: Wrap entry validation in `try { } finally { $zipArchive.Dispose() }`.
+- [x] Step 4: Run | cmd: `pwsh -NoProfile -File tests/install.Tests.ps1` | expect: exit 0 | retry: 0
+- [x] Step 5: Write `tests/install-ps1.test.mjs` and run | cmd: `bun test tests/install-ps1.test.mjs` | expect: exit 0 | retry: 1 | on_fail: mark FAILED-ISOLATED
+- [x] Step 6: Parent commits by explicit path.
 
 ### Task T8: Session verification
 
@@ -471,8 +517,44 @@ flowchart TD
 
 **Behavior & Acceptance:** AC-8, then the parent diff audit (`git diff --stat origin/main`, only planned paths), an independent review by `staid` on the diff, and the em dash and attribution scans over the diff and commit messages.
 
-- [ ] Step 1 to 5: the five commands in frontmatter, each exit 0.
-- [ ] Step 6: diff audit and review report saved as `docs/code-plan/reviews/2026-10-12-snipset-cli-stability-hardening-review.md`.
+- [x] Step 1 to 5: the five commands in frontmatter, each exit 0.
+- [x] Step 6: diff audit and review report saved as `docs/code-plan/reviews/2026-10-12-snipset-cli-stability-hardening-review.md`.
+
+### Task F1: Load the ZipFile assembly before OpenRead
+
+**Files:** Modify `install.ps1:32` area and `tests/install.Tests.ps1` (contract list). Test: `tests/install-ps1.test.mjs` (regression under PowerShell 7).
+
+**Behavior & Acceptance:** AC-F1. `install.ps1` runs `Add-Type -AssemblyName System.IO.Compression.FileSystem` before `[IO.Compression.ZipFile]::OpenRead`. On .NET Framework, which Windows PowerShell 5.1 uses, `ZipFile` lives in `System.IO.Compression.FileSystem.dll` (Microsoft .NET API reference for `ZipFile`, read 2026-10-12); whether 5.1 loads it by default is not verified here. The contract test gains the exact `Add-Type` line, so removing it turns `bun test` red.
+
+**Deliberate Shortcuts & Deferrals:** `defer: no Windows PowerShell 5.1 run, next Windows verification session`.
+
+- [x] Step 1: Add the contract entry; run `env POWERSHELL_TELEMETRY_OPTOUT=1 pwsh -NoProfile -File tests/install.Tests.ps1`, expect exit 1.
+- [x] Step 2: Add the `Add-Type` line; the same command exits 0; `bun test tests/install-ps1.test.mjs` exits 0.
+- [x] Step 3: Parent commits by explicit path.
+
+### Task F2: CLI drift guard test
+
+**Files:** Create `tests/snipset-live-cli-drift.test.mjs`.
+
+**Behavior & Acceptance:** AC-F2. For each command group the wrapper classifies (`snippet`, `group`, `stats`, `reference`, `clipboard`, `clipboard tag`, `audio`, `audio history`, `audio dictionary`, `audio tts`), the test reads the `Commands:` section of `snipset <group> --help` and fails when a listed subcommand is in neither its read nor its write table. It skips with the existing `snipsetSkip` reason when the binary is absent. `--help` is read-only and never opens a database.
+
+**Deliberate Shortcuts & Deferrals:** None.
+
+- [x] Step 1: Write the test with the tables taken from `snipset 0.2.0 --help`; run it, expect exit 0.
+- [x] Step 2: Mutation check: remove one known subcommand from a table, expect exit 1, restore.
+- [x] Step 3: Parent commits by explicit path.
+
+### Task F3: ShellCheck notes in install.sh
+
+**Files:** Modify `install.sh` (directive comments only). Test: `tests/install.test.mjs` (regression).
+
+**Behavior & Acceptance:** AC-F3. Each of the 4 pre-existing notes gets a targeted `# shellcheck disable=` line stating why: SC1003 on the `case` pattern that matches a literal backslash, SC2016 on the literal `$PATH` written into `.bashrc`, and SC2016 twice on the literal `"$schema"` JSON key written into `opencode.json`. (Corrected after execution; the first draft attributed SC1003 to the error message and all three SC2016 notes to `$PATH`.) `shellcheck install.sh` at default severity exits 0. No executable line changes.
+
+**Deliberate Shortcuts & Deferrals:** None.
+
+- [x] Step 1: Run `shellcheck install.sh`, expect exit 1 (4 notes).
+- [x] Step 2: Add the directives; `shellcheck install.sh` exits 0; `bun test tests/install.test.mjs` exits 0.
+- [x] Step 3: Parent commits by explicit path.
 
 ## 6. Execution Handoff
 
@@ -504,9 +586,14 @@ All AC rows have evidence; T8 commands exit 0 with 0 failures and 0 warnings; pa
 ## 12. Approval
 
 - Gate 2 (plan): Approved by the owner on 2026-10-12 ("Yes, please implement this plan!"), after the plan summary, task table, and Mermaid map were shown in chat. Runner state at approval: `Validation: OK`, 8 tasks.
+- Closeout (`Close plan` gate): `Mark Complete`, chosen by the owner on 2026-10-12 on the readiness verdict `NEEDS-HUMAN` (exit 3). The two `UNPROVEN` tasks, T3 (docs) and T8 (session verification), carry the `false` sentinel by design and `PASSED` in the final runner run.
 
 ## 13. Follow-up Backlog
 
 - `defer: cp of database then -wal is not atomic, upgrade-trigger: a reproduced inconsistent snapshot` (from T2).
 - `defer: no Windows runtime check of the handle release, upgrade-trigger: next Windows verification session` (from T7).
 - `defer: CI test job red on every run (missing private binary), upgrade-trigger: CI billing restored` (owner decision 2026-10-12; T4 also removes the failure mode).
+- `defer: refresh cost with Snipset Desktop running is unmeasured, upgrade-trigger: the owner reports slow wrapper reads or runs Desktop during a session` (D5).
+- `defer: the read allowlist exists in three copies (scripts/snipset-live.sh, tests/snipset-live-routing.test.mjs, tests/snipset-live-cli-drift.test.mjs) with nothing comparing them, upgrade-trigger: an allowlist change that updates one copy and not the others` (D11, found by the sweep re-pass).
+- `defer: vivera scripts/check-copy-rules.mjs scans vivera's own root when run for another repository, upgrade-trigger: next vivera session touching check-copy-rules` (D9).
+- `defer: 38 vault mirrors missing or stale in Snipset, bcb, dawnbook, vivera, upgrade-trigger: their next session or a vault-wide publish run` (D10).
