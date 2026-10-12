@@ -1,7 +1,7 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -198,13 +198,18 @@ test("uninstall leaves every startup file as it was before the install", async (
   assert.equal(existsSync(sb.share), false, out.stdout);
 });
 
-test("uninstall removes the legacy ~/.profile line from the previous installer", async () => {
+test("uninstall keeps the unmarked legacy ~/.profile line and says how to remove it", async () => {
   const sb = setup();
   const legacy = `export PATH="${sb.installDir}:$PATH"`;
-  seed(sb.at(".profile"), `user profile\n\n${legacy}\nuser tail\n`);
+  const profile = `user profile\n\n${legacy}\nuser tail\n`;
+  seed(sb.at(".profile"), profile);
   const out = await ok(sb, ["--uninstall", ...QUIET]);
-  assert.equal(read(sb.at(".profile")), "user profile\nuser tail\n", out.stdout);
-  assert.match(out.stdout, /^\[REMOVED\] path legacy line: /m);
+  assert.equal(read(sb.at(".profile")), profile, out.stdout);
+  assert.ok(
+    out.stdout.includes(`[KEEP] path legacy line: ${sb.at(".profile")}: remove it by hand if the old installer added it\n`),
+    out.stdout,
+  );
+  assert.doesNotMatch(out.stdout, /^\[REMOVED\] path legacy line: /m);
 });
 
 test("a symlinked ~/.profile stays a symlink", async () => {
@@ -230,4 +235,81 @@ test("without --add-path nothing is written", async () => {
   for (const name of [".profile", ".zshenv", ".config", join(".local", "share", "snipset")]) {
     assert.equal(existsSync(sb.at(name)), false, name);
   }
+});
+
+const USER_FILES = {
+  ".profile": "# user profile\nexport USER_PROFILE=1\n",
+  ".bashrc": "# user bashrc\nalias l='ls -l'\n",
+};
+
+function seedUserFiles(sb) {
+  for (const [name, content] of Object.entries(USER_FILES)) seed(sb.at(name), content);
+}
+
+function startupContents(sb) {
+  return Object.fromEntries(STARTUP.filter((name) => existsSync(sb.at(name))).map((name) => [name, read(sb.at(name))]));
+}
+
+function strays(sb) {
+  return readdirSync(sb.home).filter((name) => /\.snipset-(new|bak)\./.test(name));
+}
+
+async function uninstallReadOnly(sb, dir, mode = 0o555) {
+  chmodSync(dir, mode);
+  try {
+    return await runInstaller(sb, ["--uninstall", ...QUIET]);
+  } finally {
+    chmodSync(dir, 0o755);
+  }
+}
+
+test("a missing TMPDIR cannot empty a startup file on uninstall", async () => {
+  const sb = setup();
+  seedUserFiles(sb);
+  await ok(sb, QUIET);
+  const out = await runInstaller(sb, ["--uninstall", ...QUIET], { env: { TMPDIR: join(sb.root, "missing") } });
+  for (const [name, content] of Object.entries(USER_FILES)) {
+    assert.equal(read(sb.at(name)), content, `${name}\n${out.stdout}\n${out.stderr}`);
+  }
+  assert.equal(out.code, 0, out.stdout + out.stderr);
+  assert.deepEqual(strays(sb), []);
+});
+
+test("a read-only HOME fails the uninstall and leaves every startup file byte-identical", async () => {
+  const sb = setup();
+  seedUserFiles(sb);
+  await ok(sb, QUIET);
+  const before = startupContents(sb);
+  const out = await uninstallReadOnly(sb, sb.home);
+  assert.deepEqual(startupContents(sb), before, out.stdout);
+  for (const name of [".profile", ".bashrc"]) {
+    assert.ok(out.stdout.includes(`[FAIL] path line: ${sb.at(name)} left unchanged\n`), out.stdout);
+  }
+  assert.doesNotMatch(out.stdout, /^\[REMOVED\] path line: /m);
+  // The kept source lines still read the env files, so those must survive too.
+  for (const name of ["env", "env.fish"]) {
+    assert.equal(read(join(sb.share, name)), name === "env" ? envText(sb.installDir) : fishEnvText(sb.installDir));
+    assert.match(out.stdout, new RegExp(`^\\[KEEP\\] path ${name.replace(".", "\\.")}: `, "m"), out.stdout);
+  }
+  assert.equal(out.code, 1, out.stdout + out.stderr);
+  assert.deepEqual(strays(sb), []);
+});
+
+test("a read-only ~/.profile fails the uninstall, stays byte-identical, and names the kept backup", async () => {
+  const sb = setup();
+  seedUserFiles(sb);
+  await ok(sb, QUIET);
+  const profile = sb.at(".profile");
+  const before = read(profile);
+  chmodSync(profile, 0o444);
+  const out = await runInstaller(sb, ["--uninstall", ...QUIET]);
+  chmodSync(profile, 0o644);
+  assert.equal(read(profile), before, out.stdout);
+  const fail = out.stdout.split("\n").find((line) => line.startsWith(`[FAIL] path line: ${profile} `));
+  assert.ok(fail, out.stdout);
+  const backup = fail.match(/\(backup: (.+)\)$/)?.[1];
+  assert.ok(backup && backup.startsWith(`${profile}.snipset-bak.`), fail);
+  assert.equal(read(backup), before);
+  assert.equal(read(sb.at(".bashrc")), USER_FILES[".bashrc"], out.stdout);
+  assert.equal(out.code, 1, out.stdout + out.stderr);
 });

@@ -102,7 +102,10 @@ binary_check() {
 }
 binary_remove() {
   local bin="${install_dir}/snipset" gen="${install_dir}/snipset-shims"
-  if [[ ! -e "$bin" ]]; then
+  # A link may point into a package manager or a checkout that owns the real file.
+  if [[ -L "$bin" ]]; then
+    report KEEP binary "${bin} symlink left in place"
+  elif [[ ! -e "$bin" ]]; then
     report SKIP binary "${bin} not present"
   elif [[ -f "$bin" && -x "$bin" ]] && binary_is_snipset "$bin"; then
     rm -f "$bin"
@@ -110,7 +113,9 @@ binary_remove() {
   else
     report KEEP binary "${bin} does not report a snipset version"
   fi
-  if [[ ! -e "$gen" ]]; then
+  if [[ -L "$gen" ]]; then
+    report KEEP snipset-shims "${gen} symlink left in place"
+  elif [[ ! -e "$gen" ]]; then
     report SKIP snipset-shims "${gen} not present"
   elif [[ -f "$gen" ]] && binary_is_generator "$gen"; then
     rm -f "$gen"
