@@ -47,6 +47,7 @@ if ((refresh)) || [[ ! -f "$snap" ]] || [[ "$live" -nt "$snap" ]]; then
 fi
 cmd=""
 sub=""
+action=""
 skip_next=0
 for a in "$@"; do
   if ((skip_next)); then skip_next=0; continue; fi
@@ -55,21 +56,23 @@ for a in "$@"; do
     --db=*) ;;
     -*) ;;
     *)
-      if [[ -z "$cmd" ]]; then cmd="$a"; elif [[ -z "$sub" ]]; then sub="$a"; fi
+      if [[ -z "$cmd" ]]; then cmd="$a"; elif [[ -z "$sub" ]]; then sub="$a"; elif [[ -z "$action" ]]; then action="$a"; fi
       ;;
   esac
 done
+# Allowlist only: anything unrecognized falls through to the doctor-gated
+# write path, because misrouting a write to the snapshot silently loses it.
 is_read=0
-case "$cmd" in
-  snippet)
-    if [[ "$sub" == "list" || "$sub" == "get" || "$sub" == "search" || "$sub" == "expand" ]]; then is_read=1; fi
-    ;;
-  group)
-    if [[ "$sub" == "list" ]]; then is_read=1; fi
-    ;;
-  stats|clipboard|audio|reference)
-    is_read=1
-    ;;
+case "$cmd $sub" in
+  "snippet list"|"snippet get"|"snippet search"|"snippet expand") is_read=1 ;;
+  "group list") is_read=1 ;;
+  "stats "*) is_read=1 ;;
+  "reference list") is_read=1 ;;
+  "clipboard list"|"clipboard get"|"clipboard search"|"clipboard export") is_read=1 ;;
+  "clipboard tag") if [[ "$action" == "list" ]]; then is_read=1; fi ;;
+  "audio history") if [[ "$action" == "list" || "$action" == "get" ]]; then is_read=1; fi ;;
+  "audio dictionary"|"audio tts") if [[ "$action" == "list" ]]; then is_read=1; fi ;;
+  "audio stats") is_read=1 ;;
 esac
 # Never forward a user-supplied --db: the wrapper owns the --db target
 # (snapshot for reads, live for gated writes) and a duplicate would let
