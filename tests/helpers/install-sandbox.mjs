@@ -62,6 +62,17 @@ function sha256File(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+// Write any stub files into dir BEFORE calling this: a name that already exists is kept, while
+// writing a file through a tool symlink afterwards would overwrite the real /usr/bin binary.
+export function linkTools(dir, tools = DEFAULT_TOOLS) {
+  for (const tool of new Set(tools)) {
+    checkName(tool);
+    const link = join(dir, tool);
+    if (lstatSync(link, { throwIfNoEntry: false })) continue;
+    symlinkSync(requireTool(tool), link);
+  }
+}
+
 export function makeSandbox({ tools = DEFAULT_TOOLS } = {}) {
   const root = mkdtempSync(join(tmpdir(), "snipset-sbx-"));
   const sb = {
@@ -73,10 +84,7 @@ export function makeSandbox({ tools = DEFAULT_TOOLS } = {}) {
   };
   try {
     for (const dir of [sb.home, sb.bin, sb.tmp]) mkdirSync(dir);
-    for (const tool of new Set(tools)) {
-      checkName(tool);
-      symlinkSync(requireTool(tool), join(sb.bin, tool));
-    }
+    linkTools(sb.bin, tools);
   } catch (error) {
     rmSync(root, { recursive: true, force: true });
     throw error;
@@ -157,12 +165,19 @@ snipset snippet list --limit 500 2>/dev/null | while IFS='\t' read -r _u kw _res
 done
 `;
 
-const SHELL_STUBS = {
-  "shell/snipset.sh": "# snipset.sh fixture\n",
-  "shell/completion.bash": "# completion.bash fixture\n",
-  "shell/tab.sh": "# tab.sh fixture\n",
-  "shell/snipset-shims.sh": FAKE_GENERATOR,
-};
+const SHELL_STUBS = Object.freeze({
+  "snipset.sh": "# snipset.sh fixture\n",
+  "completion.bash": "# completion.bash fixture\n",
+  "tab.sh": "# tab.sh fixture\n",
+});
+
+function shellFiles(shellStubs = {}) {
+  for (const name of Object.keys(shellStubs)) {
+    if (!Object.hasOwn(SHELL_STUBS, name)) throw new Error(`install-sandbox: unknown shell stub ${name}`);
+  }
+  const files = { ...SHELL_STUBS, ...shellStubs, "snipset-shims.sh": FAKE_GENERATOR };
+  return Object.entries(files).map(([name, content]) => [`shell/${name}`, content]);
+}
 
 function normalizeVersion(version) {
   const v = String(version).replace(/^v/, "");
@@ -177,10 +192,13 @@ function writeStaged(stage, name, content, mode) {
   chmodSync(full, mode);
 }
 
-function writeSums(dir, archive, assetName, { badHash, starMarker }) {
+// starMarker mimics `sha256sum -b` (`<hex> *<name>`). sumsName (a string, or a function of the
+// asset name) lets a test write an entry for another file, such as `old-<asset>`.
+function writeSums(dir, archive, assetName, { badHash, starMarker, sumsName }) {
   const sums = join(dir, "SHA256SUMS");
   const digest = badHash ? "0".repeat(64) : sha256File(archive);
-  writeFileSync(sums, `${digest}${starMarker ? " *" : "  "}${assetName}\n`);
+  const entry = typeof sumsName === "function" ? sumsName(assetName) : (sumsName ?? assetName);
+  writeFileSync(sums, `${digest}${starMarker ? " *" : "  "}${entry}\n`);
   return sums;
 }
 
@@ -190,31 +208,32 @@ export function fakeLinuxRelease({
   withShell = true,
   starMarker = false,
   failingVersion = false,
+  shellStubs,
+  sumsName,
 } = {}) {
   const v = normalizeVersion(version);
   const tag = `v${v}`;
   const assetName = `snipset-cli-${tag}-x86_64-unknown-linux-gnu.tar.gz`;
+  const shell = withShell ? shellFiles(shellStubs) : [];
   const dir = mkdtempSync(join(tmpdir(), "snipset-rel-"));
   const stage = join(dir, ".stage");
   const members = ["snipset", "LICENSE"];
   writeStaged(stage, "snipset", stubSnipset(v, failingVersion), 0o755);
   writeStaged(stage, "LICENSE", LICENSE_TEXT, 0o644);
-  if (withShell) {
-    for (const [name, content] of Object.entries(SHELL_STUBS)) {
-      writeStaged(stage, name, content, 0o755);
-      members.push(name);
-    }
+  for (const [name, content] of shell) {
+    writeStaged(stage, name, content, 0o755);
+    members.push(name);
   }
   const archive = join(dir, assetName);
   execFileSync(requireTool("tar"), ["-czf", archive, "-C", stage, ...members], {
     env: { PATH: HOST_PATH, LANG: "C" },
   });
   rmSync(stage, { recursive: true, force: true });
-  const sums = writeSums(dir, archive, assetName, { badHash, starMarker });
+  const sums = writeSums(dir, archive, assetName, { badHash, starMarker, sumsName });
   return { dir, archive, sums, version: v, tag, assetName };
 }
 
-export function fakeWindowsRelease({ version = "0.1.0", badHash = false } = {}) {
+export function fakeWindowsRelease({ version = "0.1.0", badHash = false, starMarker = false, sumsName } = {}) {
   const bsdtar = resolveTool("bsdtar");
   if (!bsdtar) return null;
   const v = normalizeVersion(version);
@@ -229,7 +248,7 @@ export function fakeWindowsRelease({ version = "0.1.0", badHash = false } = {}) 
     env: { PATH: HOST_PATH, LANG: "C" },
   });
   rmSync(stage, { recursive: true, force: true });
-  const sums = writeSums(dir, archive, assetName, { badHash, starMarker: false });
+  const sums = writeSums(dir, archive, assetName, { badHash, starMarker, sumsName });
   return { dir, archive, sums, version: v, tag, assetName };
 }
 
@@ -386,14 +405,32 @@ export function installerPath(target = "sh") {
 
 export async function runInstaller(sb, args, { script = installerPath("sh"), env = {} } = {}) {
   sb.assertSandbox();
+  return spawnBash(sb, [script, ...args], env);
+}
+
+// The `curl ... | bash -s -- args` shape: the bundle arrives on a stdin pipe, not as a file.
+export async function runInstallerPiped(sb, args, { script = installerPath("sh"), trailer = "", env = {} } = {}) {
+  sb.assertSandbox();
+  const input = Buffer.concat([readFileSync(script), Buffer.from(trailer)]);
+  return spawnBash(sb, ["-s", "--", ...args], env, input);
+}
+
+function spawnBash(sb, args, env, input) {
   const sandboxBash = join(sb.bin, "bash");
   const bash = existsSync(sandboxBash) ? sandboxBash : requireTool("bash");
   return new Promise((resolve, reject) => {
-    const child = spawn(bash, [script, ...args], {
+    const child = spawn(bash, args, {
       env: sb.env(env),
       cwd: sb.root,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (input !== undefined) {
+      // A script that exits before reading all of stdin makes the rest of the write fail with EPIPE.
+      child.stdin.on("error", (error) => {
+        if (error.code !== "EPIPE") reject(error);
+      });
+      child.stdin.end(input);
+    }
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");

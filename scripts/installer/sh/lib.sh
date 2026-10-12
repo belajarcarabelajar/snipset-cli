@@ -75,6 +75,91 @@ rewrite_from() {
   fi
   rewrite_file "$file" "$new"
 }
+dirs_record_present() {
+  [[ -e "${install_dir}/.snipset-dirs" || -L "${install_dir}/.snipset-dirs" ]]
+}
+# Adds each PATH not yet listed to the record REC (LABEL names it in reports). The old lines
+# are kept, and the new record replaces the file with mv -T, so a symlink there (even one to a
+# directory) is not followed and a real directory makes mv fail.
+record_add() {
+  local label="$1" rec="$2" old="" text path new=""
+  shift 2
+  if [[ -f "$rec" && ! -L "$rec" ]]; then
+    # Without the x, an unreadable record would read as empty and lose its lines.
+    old="$(cat -- "$rec" 2>/dev/null && printf x)" || old=""
+    if [[ "$old" != *x ]]; then
+      report FAIL "$label" "${rec} could not be read"
+      return 0
+    fi
+    old="${old%x}"
+  fi
+  text="$old"
+  [[ -z "$text" || "$text" == *$'\n' ]] || text+=$'\n'
+  for path in "$@"; do
+    # The record is one path per line.
+    [[ "$path" != *$'\n'* ]] || continue
+    [[ $'\n'"$text" != *$'\n'"$path"$'\n'* ]] || continue
+    text+="${path}"$'\n'
+  done
+  # An empty dirs record still marks an install made by this installer.
+  [[ "$text" != "$old" || -L "$rec" || ! -e "$rec" ]] || return 0
+  if new="$(mktemp "${rec}.XXXXXX" 2>/dev/null)" && printf '%s' "$text" > "$new" && mv -fT -- "$new" "$rec"; then
+    return 0
+  fi
+  [[ -z "$new" ]] || rm -f -- "$new"
+  report FAIL "$label" "${rec} could not be written"
+}
+dirs_record_add() {
+  record_add 'dirs record' "${install_dir}/.snipset-dirs" "$@"
+}
+# Reads the record REC into record_text, then deletes it. Returns 1, deleting nothing, when
+# there is no record, when it is a symlink (left in place), or when it could not be read.
+record_take() {
+  local label="$1" rec="$2"
+  record_text=""
+  if [[ -L "$rec" ]]; then
+    report KEEP "$label" "${rec} symlink left in place"
+    return 1
+  fi
+  [[ -f "$rec" ]] || return 1
+  record_text="$(cat -- "$rec" 2>/dev/null && printf x)" || record_text=""
+  if [[ "$record_text" != *x ]]; then
+    report FAIL "$label" "${rec} could not be read"
+    return 1
+  fi
+  record_text="${record_text%x}"
+  rm -f -- "$rec"
+}
+# touch FILE, then records it in .snipset-files when this call created it, so --uninstall
+# can remove it once the installer's lines are gone. A symlink there is the user's, even dangling.
+touch_recorded() {
+  if [[ -e "$1" || -L "$1" ]]; then
+    touch -- "$1"
+    return
+  fi
+  touch -- "$1" || return 1
+  record_add 'files record' "${install_dir}/.snipset-files" "$1"
+}
+# mkdir -p DIR, then records each directory it created, so --uninstall can remove
+# exactly those (when empty) and never one the user already had.
+mkdir_recorded() {
+  local probe="$1" up
+  local -a made=()
+  while [[ ! -e "$probe" && ! -L "$probe" ]]; do
+    made+=("$probe")
+    up="$(dirname -- "$probe")"
+    [[ "$up" != "$probe" ]] || break
+    probe="$up"
+  done
+  mkdir -p -- "$1" || return 1
+  ((${#made[@]} == 0)) || dirs_record_add "${made[@]}"
+}
+share_removed=0
+# Without a record (an older install, or a second uninstall) the share dir goes only
+# when this uninstall deleted an installer file from it, so a user's own dir stays.
+share_dir_fallback_rmdir() {
+  dirs_record_present || ((share_removed == 0)) || rmdir "$share_dir" 2>/dev/null || true
+}
 rewrite_fail() {
   if [[ -z "$rewrite_backup" ]]; then
     report FAIL "$1" "$2 left unchanged"

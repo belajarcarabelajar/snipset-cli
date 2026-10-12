@@ -1,11 +1,14 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -24,9 +27,11 @@ import {
   fakeLinuxRelease,
   fakeWindowsRelease,
   installerPath,
+  linkTools,
   makeSandbox,
   readDownloads,
   runInstaller,
+  runInstallerPiped,
   snapshotTree,
   stubCommand,
 } from "./helpers/install-sandbox.mjs";
@@ -371,6 +376,95 @@ test("runInstaller refuses a sandbox whose HOME is the real HOME", async () => {
   const sb = sandbox();
   sb.home = homedir();
   await assert.rejects(() => runInstaller(sb, ["--help"], { script: committedInstallSh }));
+});
+
+test("helper v2: fakeLinuxRelease shellStubs replaces only the named shell files", () => {
+  const sb = sandbox();
+  const out = extract(sb, linuxRelease({ shellStubs: { "snipset.sh": "# custom snipset.sh\n" } }));
+  assert.equal(readFileSync(join(out, "shell", "snipset.sh"), "utf8"), "# custom snipset.sh\n");
+  assert.equal(readFileSync(join(out, "shell", "completion.bash"), "utf8"), "# completion.bash fixture\n");
+  assert.equal(readFileSync(join(out, "shell", "tab.sh"), "utf8"), "# tab.sh fixture\n");
+  assert.throws(() => linuxRelease({ shellStubs: { "snipset-shims.sh": "x" } }), /unknown shell stub/);
+});
+
+test("helper v2: runInstallerPiped feeds the script and the trailer to bash -s", async () => {
+  const sb = sandbox();
+  const script = join(sb.tmp, "tiny.sh");
+  // Bun backs a "pipe" stdin with a socketpair, so `[ -p /dev/stdin ]` is false here; a real
+  // `curl | bash` gives a FIFO. Both are neither a terminal nor a regular file.
+  writeFileSync(script, 'echo "args:$*"\necho "home:$HOME"\n[ -t 0 ] || [ -f /dev/stdin ] || echo STDIN-STREAM\n');
+  const r = await runInstallerPiped(sb, ["--a", "b c"], { script, trailer: "echo TRAILER-OK\n" });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.signal, null);
+  assert.equal(r.stdout, `args:--a b c\nhome:${sb.home}\nSTDIN-STREAM\nTRAILER-OK\n`);
+  assert.equal(r.stderr, "");
+});
+
+test("helper v2: runInstallerPiped refuses a sandbox whose HOME is the real HOME", async () => {
+  const sb = sandbox();
+  sb.home = homedir();
+  await assert.rejects(() => runInstallerPiped(sb, ["--help"], { script: committedInstallSh }));
+});
+
+test("helper v2: linkTools links DEFAULT_TOOLS as symlinks into /usr/bin or /bin", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "snipset-link-"));
+  try {
+    linkTools(dir);
+    assert.deepEqual(readdirSync(dir).sort(), [...DEFAULT_TOOLS].sort());
+    for (const tool of DEFAULT_TOOLS) {
+      assert.ok(lstatSync(join(dir, tool)).isSymbolicLink(), tool);
+      assert.match(readlinkSync(join(dir, tool)), /^\/(usr\/)?bin\//, tool);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("helper v2: linkTools keeps a stub file written before it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "snipset-link-"));
+  try {
+    writeFileSync(join(dir, "uname"), "#!/bin/sh\necho Darwin\n");
+    linkTools(dir, ["uname", "cat", "cat"]);
+    assert.deepEqual(readdirSync(dir).sort(), ["cat", "uname"]);
+    assert.equal(lstatSync(join(dir, "uname")).isSymbolicLink(), false);
+    assert.equal(readFileSync(join(dir, "uname"), "utf8"), "#!/bin/sh\necho Darwin\n");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("helper v2: fakeWindowsRelease starMarker writes a binary-mode entry that still verifies", (t) => {
+  const sb = sandbox();
+  const rel = fakeWindowsRelease({ starMarker: true });
+  if (rel === null) {
+    t.skip("bsdtar is not installed");
+    return;
+  }
+  releases.push(rel);
+  assert.match(readFileSync(rel.sums, "utf8"), /^[0-9a-f]{64} \*snipset-cli-v0\.1\.0-x86_64-pc-windows-msvc\.zip\n$/);
+  assert.equal(sh(sb, "sha256sum -c SHA256SUMS", { cwd: rel.dir }).code, 0);
+  const bad = fakeWindowsRelease({ badHash: true, starMarker: true });
+  releases.push(bad);
+  assert.equal(readFileSync(bad.sums, "utf8"), `${"0".repeat(64)} *${bad.assetName}\n`);
+});
+
+test("helper v2: sumsName overrides the Linux SHA256SUMS entry name", () => {
+  const rel = linuxRelease({ starMarker: true, sumsName: (name) => `old-${name}` });
+  const hex = createHash("sha256").update(readFileSync(rel.archive)).digest("hex");
+  assert.equal(readFileSync(rel.sums, "utf8"), `${hex} *old-${rel.assetName}\n`);
+  const plain = linuxRelease({ sumsName: "other.tar.gz" });
+  assert.match(readFileSync(plain.sums, "utf8"), /^[0-9a-f]{64}  other\.tar\.gz\n$/);
+});
+
+test("helper v2: sumsName overrides the Windows SHA256SUMS entry name", (t) => {
+  const rel = fakeWindowsRelease({ starMarker: true, sumsName: (name) => `old-${name}` });
+  if (rel === null) {
+    t.skip("bsdtar is not installed");
+    return;
+  }
+  releases.push(rel);
+  const hex = createHash("sha256").update(readFileSync(rel.archive)).digest("hex");
+  assert.equal(readFileSync(rel.sums, "utf8"), `${hex} *old-${rel.assetName}\n`);
 });
 
 test("the sandbox root is gone after cleanupSandbox", async () => {

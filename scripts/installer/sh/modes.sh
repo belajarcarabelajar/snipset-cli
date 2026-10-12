@@ -147,6 +147,75 @@ do_update() {
   fi
   do_install
 }
+# Prints, one per line, every directory an install with the current flags may create
+# (the parent of each file it writes, and their ancestors up to, not including, HOME
+# or /), using the same expressions as the mkdir_recorded call sites.
+dirs_candidates() {
+  local home="${HOME%"${HOME##*[!/]}"}" target path up id file
+  local -a ids targets=("$install_dir" "$share_dir" "${bashrc%/*}")
+  file="$(pathenv_fish_conf)"
+  targets+=("${file%/*}" "${HOME}/.config/fish/conf.d")
+  file="$(pathenv_zshenv)"
+  targets+=("${file%/*}")
+  read -r -a ids <<< "$mcp_list"
+  for id in "${ids[@]}"; do
+    case "$id" in
+      opencode|cursor) targets+=("$(dirname "$(mcp_file "$id")")") ;;
+    esac
+  done
+  for target in "${targets[@]}"; do
+    path="$target"
+    while [[ -n "$path" && "$path" != . && "${path%"${path##*[!/]}"}" != "$home" && -n "${path%"${path##*[!/]}"}" ]]; do
+      printf '%s\n' "$path"
+      up="$(dirname -- "$path")"
+      [[ "$up" != "$path" ]] || break
+      path="$up"
+    done
+  done
+}
+# Runs last: removes, deepest first, each recorded directory that the current flags
+# could have created, that is a real directory, and that rmdir finds empty.
+dirs_remove() {
+  local cands path
+  record_take 'dirs record' "${install_dir}/.snipset-dirs" || return 0
+  cands=$'\n'"$(dirs_candidates)"$'\n'
+  while IFS= read -r path; do
+    [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
+    # A .. component could name HOME or / under another spelling.
+    [[ "/${path}/" != */../* ]] || continue
+    [[ -d "$path" && ! -L "$path" ]] || continue
+    if rmdir -- "$path" 2>/dev/null; then
+      report REMOVED dir "$path"
+    fi
+  done < <(printf '%s' "$record_text" | awk '{ print length($0) "\t" $0 }' | sort -k1,1nr | cut -f2-)
+}
+# Prints, one per line, every startup file an install with the current flags may create,
+# using the same expressions as the touch_recorded call sites.
+files_candidates() {
+  pathenv_collect_bash
+  printf '%s\n' "$bashrc" "${HOME}/.profile" "${pathenv_bash[@]}" "$(pathenv_zshenv)"
+}
+# Runs after the shell block and path lines are gone, and before dirs_remove: removes each
+# recorded startup file that the current flags could have created, that is a regular file,
+# and that now holds only whitespace. Any other byte is the user's, so that file stays.
+files_remove() {
+  local cands path rc
+  record_take 'files record' "${install_dir}/.snipset-files" || return 0
+  cands=$'\n'"$(files_candidates)"$'\n'
+  while IFS= read -r path; do
+    [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
+    [[ -f "$path" && ! -L "$path" ]] || continue
+    # In the C locale every byte but ASCII whitespace matches, NUL and invalid UTF-8 included.
+    rc=0
+    LC_ALL=C grep -q -e '[^[:space:]]' -- "$path" 2>/dev/null || rc=$?
+    ((rc == 1)) || continue
+    if rm -f -- "$path" 2>/dev/null && [[ ! -e "$path" ]]; then
+      report REMOVED 'startup file' "$path"
+    else
+      report FAIL 'startup file' "${path} could not be removed"
+    fi
+  done <<< "$record_text"
+}
 do_uninstall() {
   # The remove functions delete for real, so there is nothing safe to preview.
   if ((dry_run)); then
@@ -158,6 +227,8 @@ do_uninstall() {
   shell_remove
   pathenv_remove
   binary_remove
+  files_remove
+  dirs_remove
   printf 'uninstall: removed %d, kept %d\n' "$n_removed" "$n_kept"
   ((n_fail == 0)) || exit 1
 }

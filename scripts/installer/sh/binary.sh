@@ -17,7 +17,7 @@ binary_verify() {
   [[ $'\n'"$verbose" != *$'\n'h* ]] || die 'hard links are not allowed in release archives'
 }
 binary_stage() {
-  mkdir -p "$install_dir"
+  mkdir_recorded "$install_dir"
   stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
   # As root, tar would otherwise keep the packer's uid and mode bits.
   tar --no-same-owner --no-same-permissions -xzf "${1}/${archive}" -C "$stage"
@@ -72,6 +72,9 @@ binary_place() {
     chmod 755 "${stage}/shell/snipset-shims.sh"
     mv -f "${stage}/shell/snipset-shims.sh" "${install_dir}/snipset-shims"
   fi
+  # Written only after the binary is placed, so an install refused or aborted before
+  # that leaves an existing install dir as it was.
+  dirs_record_add
 }
 binary_installed_version() {
   local out v
