@@ -147,6 +147,26 @@ describe("render.mjs CLI", () => {
     expect(r.stderr).toMatch(/\bCR\b/);
   });
 
+  for (const version of ["0.3.0-rc.1", "0.3.0+build.5"]) {
+    test(`packaging/VERSION ${version} is refused because AUR pkgver cannot hold it, writing nothing`, () => {
+      const root = tempRoot();
+      writeFileSync(join(root, "packaging", "VERSION"), `${version}\n`);
+      // Sums for the same version, so a refusal can only come from the version check.
+      writeFileSync(
+        join(root, "packaging", "SHA256SUMS"),
+        `${LINUX_SHA}  snipset-cli-v${version}-x86_64-unknown-linux-gnu.tar.gz\n` +
+          `${WINDOWS_SHA}  snipset-cli-v${version}-x86_64-pc-windows-msvc.zip\n`,
+      );
+      const r = render(root);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBe(
+        `render: packaging/VERSION ${version} has a pre-release part; AUR pkgver cannot hold a hyphen\n`,
+      );
+      expect(r.code).toBe(1);
+      expect(existsSync(join(root, "out"))).toBe(false);
+    });
+  }
+
   test("--channel nope exits 2 naming the channel", () => {
     const root = tempRoot();
     const r = render(root, ["--channel", "nope"]);
@@ -179,6 +199,16 @@ describe("render.mjs CLI", () => {
     const r = render(root, ["--bogus"]);
     expect(r.code).toBe(2);
     expect(r.stderr).toContain("usage:");
+  });
+
+  test("--help and the usage text name the winget folder step after a version change", () => {
+    const step =
+      "after changing packaging/VERSION, delete the previous version's folder under packaging/winget/manifests before --check";
+    const root = tempRoot();
+    const help = render(root, ["--help"]);
+    expect(help.code).toBe(0);
+    expect(lines(help.stdout)).toContain(step);
+    expect(lines(render(root, ["--bogus"]).stderr)).toContain(step);
   });
 });
 

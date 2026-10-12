@@ -4,7 +4,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = "belajarcarabelajar/snipset-cli";
-const USAGE = "usage: bun scripts/packaging/render.mjs [--check] [--channel ID] [--root DIR] [--templates DIR]";
+const USAGE = [
+  "usage: bun scripts/packaging/render.mjs [--check] [--channel ID] [--root DIR] [--templates DIR]",
+  "after changing packaging/VERSION, delete the previous version's folder under packaging/winget/manifests before --check",
+].join("\n");
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 class UsageError extends Error {}
@@ -24,6 +27,10 @@ export function parseVersion(text) {
   const version = text.endsWith("\n") ? text.slice(0, -1) : text;
   if (!SEMVER.test(version)) {
     throw new Error(`packaging/VERSION must be one semver line without a leading v, got ${JSON.stringify(text)}`);
+  }
+  // makepkg rejects a hyphen in pkgver (exit 12), and every channel shares this one version.
+  if (/[-+]/.test(version)) {
+    throw new Error(`packaging/VERSION ${version} has a pre-release part; AUR pkgver cannot hold a hyphen`);
   }
   return version;
 }

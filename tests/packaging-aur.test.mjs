@@ -107,7 +107,9 @@ describe("AUR package", () => {
     expect(text).toContain("arch=('x86_64')\n");
     expect(text).toMatch(/^url='https:\/\/.+'$/m);
     expect(text).toContain("license=('LicenseRef-Snipset-EULA')\n");
-    expect(text).toContain("depends=('glibc' 'gcc-libs' 'openssl' 'zlib' 'brotli' 'zstd')\n");
+    // readelf -d NEEDED of the release binary: libcrypto.so.3 (openssl), libgcc_s.so.1 (libgcc), libm and libc (glibc).
+    expect(text).toContain("depends=('glibc' 'libgcc' 'openssl')\n");
+    expect(readFileSync(SRCINFO, "utf8")).toContain("\tdepends = glibc\n\tdepends = libgcc\n\tdepends = openssl\n\toptions = !strip\n");
     expect(text).toContain("options=('!strip' '!debug')\n");
     expect(text).toContain(`source_x86_64=("snipset-cli-$pkgver-x86_64.tar.gz::${SOURCE_URL}")\n`);
   });
