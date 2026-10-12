@@ -81,12 +81,21 @@ mcp_claude_probe() {
   fi
 }
 # The user settings file decides ownership; "gemini mcp list" merges every scope.
+# Only the "snipset" object's own command counts: [^{}] keeps the match inside that
+# one object, so a sibling "snipset-dev" or a nested object holding the binary does
+# not make the entry ours. The value is compared as a plain string, not a pattern.
 mcp_gemini_probe() {
   local settings out line text=""
+  local re='"snipset"[[:space:]]*:[[:space:]]*\{[^{}]*"command"[[:space:]]*:[[:space:]]*"([^"]*)"'
   settings="$(mcp_gemini_settings)"
   [[ ! -f "$settings" ]] || text="$(cat -- "$settings")"
   if [[ "$text" == *'"snipset"'* ]]; then
-    if [[ "$text" == *"\"${snipset_bin}\""* ]]; then printf 'mine'; else printf 'foreign'; fi
+    text="${text//$'\n'/ }"
+    if [[ "$text" =~ $re ]] && [[ "${BASH_REMATCH[1]}" == "$snipset_bin" ]]; then
+      printf 'mine'
+    else
+      printf 'foreign'
+    fi
     return 0
   fi
   out="$(gemini mcp list 2>/dev/null </dev/null)" || out=""
