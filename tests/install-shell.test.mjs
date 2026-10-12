@@ -245,3 +245,35 @@ test("a read-only HOME keeps the shell block byte-identical and fails the uninst
   assert.equal(res.code, 1, `${res.stdout}\n${res.stderr}`);
   assert.deepEqual(readdirSync(sb.home).filter((name) => /\.snipset-(new|bak)\./.test(name)), []);
 });
+
+const INIT_NOTE = "install.sh: database init skipped (already exists or unreachable); run 'snipset doctor' to check";
+
+test("reinstall over an existing database prints only the installer's init note", async () => {
+  const { sb } = setup();
+  await install(sb);
+  const res = await install(sb);
+  const lines = res.stderr.split("\n");
+  assert.ok(lines.includes(INIT_NOTE), res.stderr);
+  assert.deepEqual(lines.filter((line) => line.includes("already exists")), [INIT_NOTE]);
+});
+
+test("an init failure other than an existing database is still shown", { skip: process.getuid?.() === 0 && "root ignores directory permissions" }, async () => {
+  const { sb } = setup();
+  const roDir = join(sb.home, "ro");
+  mkdirSync(roDir);
+  chmodSync(roDir, 0o555);
+  let res;
+  try {
+    res = await install(sb, ["--db", join(roDir, "snipset.db")]);
+  } finally {
+    chmodSync(roDir, 0o755);
+  }
+  const lines = res.stderr.split("\n");
+  assert.ok(lines.includes(INIT_NOTE), res.stderr);
+  assert.deepEqual(
+    lines.filter((line) => line.includes("Permission denied")).map((line) => line.startsWith("install.sh: snipset init: ")),
+    [true],
+    res.stderr,
+  );
+  assert.ok(!existsSync(join(roDir, "snipset.db")));
+});
