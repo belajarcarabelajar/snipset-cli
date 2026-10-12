@@ -46,14 +46,27 @@ binary_smoke() {
   fi
   die "install aborted before replacing ${install_dir}/snipset"
 }
+# mv -f would overwrite a file the user owns (or a link's target slot), and
+# uninstall would later delete it as ours.
+binary_refuse_foreign() {
+  local target="$1" check="$2"
+  [[ -e "$target" || -L "$target" ]] || return 0
+  [[ ! -L "$target" && -f "$target" ]] && "$check" "$target" && return 0
+  die "${target} exists and is not a snipset install; move it aside or pass --install-dir"
+}
 binary_place() {
-  mv -f "${stage}/snipset" "${install_dir}/snipset"
   # The shell bundle (shell/snipset.sh, shell/completion.bash, shell/tab.sh,
   # shell/snipset-shims.sh) ships with newer releases. Older archives carry the
   # binary only; setup steps below degrade to a binary-only install.
   has_shell=0
   if [[ -f "${stage}/shell/snipset.sh" && -f "${stage}/shell/completion.bash" && -f "${stage}/shell/tab.sh" && -f "${stage}/shell/snipset-shims.sh" ]]; then
     has_shell=1
+  fi
+  # Both targets are checked before either move, so a refusal leaves no half-placed install.
+  binary_refuse_foreign "${install_dir}/snipset" binary_is_snipset
+  ((has_shell == 0)) || binary_refuse_foreign "${install_dir}/snipset-shims" binary_is_generator
+  mv -f "${stage}/snipset" "${install_dir}/snipset"
+  if ((has_shell)); then
     chmod 755 "${stage}/shell/snipset-shims.sh"
     mv -f "${stage}/shell/snipset-shims.sh" "${install_dir}/snipset-shims"
   fi

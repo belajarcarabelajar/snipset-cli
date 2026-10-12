@@ -34,6 +34,7 @@ esac
 `;
 
 const FAKE_GENERATOR = `#!/bin/sh
+# snipset-shims: generate trigger shims (test fixture)
 dir="$HOME/.local/bin"
 while [ "$#" -gt 0 ]; do
   case "$1" in
