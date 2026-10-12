@@ -240,6 +240,10 @@ describe("deferred hardening notes", () => {
     expect(text).toContain("except the default share dir an older install left");
   });
 
+  test("deferred hardening: created startup files are removed once only blank lines remain", () => {
+    expect(section("Check, update, uninstall, dry run")).toContain("`<install-dir>/.snipset-files`");
+  });
+
   test("deferred hardening: in-use asides on Windows are cleaned up", () => {
     const text = section("Windows x64");
     expect(text).toContain("`snipset.exe.old-<pid>-<8 hex>`");

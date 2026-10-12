@@ -192,9 +192,6 @@ test("dirs record: ZDOTDIR and a custom --bashrc parent are recorded and removed
   for (const path of [sb.at("zdot"), sb.at("rc"), sb.at("rc", "sub")]) {
     assert.ok(lines.includes(path), `${path} is not in the record:\n${lines.join("\n")}`);
   }
-  // Uninstall leaves both startup files in place (emptied), so the test deletes them first.
-  await rm(sb.at("zdot", ".zshenv"));
-  await rm(sb.at("rc", "sub", "bashrc"));
   const un = await ok(sb, ["--uninstall", ...flags], env);
   assert.deepEqual(dirs(sb), before, un.stdout);
 });
