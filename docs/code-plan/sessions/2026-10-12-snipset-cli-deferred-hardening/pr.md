@@ -14,6 +14,7 @@
 Eight items deferred by PR #6, plus one new Windows finding.
 
 - **Share-dir files (L1):** `install.sh` records the shell files it writes in `<share-dir>/.snipset-bundle` (sha256 per file). A `snipset.sh`, `completion.bash`, or `tab.sh` that it did not write, or that was edited, is kept on install and uninstall with `[KEEP]`, and the bashrc block is not added while one is kept. Before, install overwrote such a file and uninstall deleted it.
+- **Created startup files (debt sweep S2):** the installer lists startup files it created (a custom `--bashrc`, `~/.profile`, `.zshenv`) in `<install-dir>/.snipset-files`; uninstall removes such a file once only whitespace is left. A file you already had stays.
 - **Directories (L2):** the install records each directory it creates in `<install-dir>/.snipset-dirs`; uninstall removes, deepest first, the recorded directories that the current flags could have created and that are empty. A directory that existed before, or holds a file, stays. A reinstall over an older install adopts the default share dir that install left, so uninstall still removes it.
 - **curl | bash (L3):** a test pipes the bundle through `bash -s` with stateful harness stubs and proves no harness call reads the rest of the script; a bundle without the redirect is shown to lose the trailer.
 - **Legacy tests (L4):** the 14 original install tests run with a PATH that holds none of the caller's entries.
@@ -77,10 +78,9 @@ Every task started from a failing test (RED recorded in the plan checklist); gua
 
 ## 7. Pre-Existing Issues and Deferred Debt
 
-- A startup file the installer created (a custom `--bashrc` that did not exist, `$ZDOTDIR/.zshenv`) is left emptied after uninstall (pre-existing). `defer: record created files, a user report`.
-- Uninstall with fewer flags than the install deletes the whole directory record, so recorded directories outside the current flags stay untracked (empty, safe direction). `defer: keep unremoved entries, a user report`.
+- Uninstall with fewer flags than the install deletes the whole directory record, so recorded directories outside the current flags stay untracked (empty, safe direction). `defer: an empty install dir holding only the record would then stay, a user report of untracked leftover directories` (sweep S4, not selected).
 - Two installs sharing one share dir leave it empty after both uninstall; directories made by an installer older than the record stay. `defer: documented, a user report`.
-- Windows: a locked aside on uninstall prints a NOTE and is not counted in `kept`; check does not compare an MCP entry's `--db`. `defer: cosmetic, the next ps1 change`.
+- Windows: a locked aside on uninstall prints a NOTE and is not counted in `kept` (sweep S3, not selected); check does not compare an MCP entry's `--db` on either installer. `defer: cosmetic, the next change to modes.ps1 uninstall`.
 - Windows behaviour was not run on Windows: file locks, junctions, 8.3 names, a possible blocking "System Error" dialog before `-1073741515` reaches PowerShell, Windows PowerShell 5.1 argument passing. `defer: labelled not verified, a Windows host`.
 - The v0.2.0 Windows build imports `libcrypto-3-x64.dll` and `VCRUNTIME140.dll`; the fix (static OpenSSL and CRT, or shipping the DLLs) is in the Snipset release build. `defer: other repository, the next Snipset distribution session`.
 - Carried from PR #6: L6, L8, L9, L12, L13 (see the install-coverage debt sweep).
