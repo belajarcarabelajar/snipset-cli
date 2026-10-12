@@ -29,9 +29,13 @@ try {
   $expected = $Matches[1].ToLowerInvariant()
   $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
   if ($actual -ne $expected) { throw 'install.ps1: checksum mismatch' }
-  $entries = [IO.Compression.ZipFile]::OpenRead($zip).Entries
-  foreach ($entry in $entries) {
-    if ([IO.Path]::IsPathRooted($entry.FullName) -or $entry.FullName -match '(^|[\\/])\.\.([\\/]|$)' -or $entry.FullName -match '(^|[\\/])\.git([\\/]|$)') { throw 'install.ps1: unsafe archive entry' }
+  $zipArchive = [IO.Compression.ZipFile]::OpenRead($zip)
+  try {
+    foreach ($entry in $zipArchive.Entries) {
+      if ([IO.Path]::IsPathRooted($entry.FullName) -or $entry.FullName -match '(^|[\\/])\.\.([\\/]|$)' -or $entry.FullName -match '(^|[\\/])\.git([\\/]|$)') { throw 'install.ps1: unsafe archive entry' }
+    }
+  } finally {
+    $zipArchive.Dispose()
   }
   New-Item -ItemType Directory -Force -Path $stage | Out-Null
   Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
