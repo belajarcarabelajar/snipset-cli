@@ -30,7 +30,27 @@ Not a finding: a reinstall over an existing database relays the CLI's `schema mi
 
 ## Reviewer E: README claims
 
-Pending.
+Counts over 144 claims (the companion section skipped): TRUE 106, FALSE 2, OVERSTATED 9, UNTESTABLE-HERE 27. Runs: installer, README, and packaging suites 395 pass 6 skip; real-asset suite 4 pass; both drift checks exit 0.
+
+| # | Kind | README line | Claim | What is true | Fix |
+|---|---|---|---|---|---|
+| E1 | FALSE (code bug) | 143 | `vscode` install runs `code --add-mcp` | when `~/.config/Code/User/mcp.json` exists without snipset, `mcp.sh` reports `[KEEP] ... already registered` and never calls `code`; check then exits 1 forever | C11d |
+| E2 | FALSE | 124 | bash files get the line "when the file exists" | the `--bashrc` file also gets it when shell integration is about to create it | parent README edit |
+| E3 | OVERSTATED | 41 | refuses other systems "before it writes anything" | OS, CPU, musl, and glibc are refused before any download; a missing `libcrypto.so.3` is caught by the smoke test after the download, before anything is replaced (an empty install dir can remain) | parent README edit |
+| E4 | OVERSTATED | 52 | releases without the bundle "skip the setup steps" | only shell integration and shims are skipped; database init, PATH, and MCP still run | parent README edit |
+| E5 | OVERSTATED | 80 | `--check` "Reads only" | with `--with-mcp=claude` it runs `claude mcp get`, which writes Claude's own state (Known limits says so) | parent README edit |
+| E6 | OVERSTATED | 88 | exit 1 when "a step failed" | a failed `snipset init` or shim generation prints a note and the install still exits 0 | parent README edit |
+| E7 | OVERSTATED (code bug) | 87, 93 | `--check` with the same flags exits 0 when current | after install keeps a pre-existing OpenCode or Cursor file without snipset, `--check` reports `[MISSING]` and exits 1 forever | C11d |
+| E8 | OVERSTATED | 170 | `-Uninstall` removes the dir from the User Path | only when the installer added it (marker) and the exe was removed | parent README edit |
+| E9 | OVERSTATED | 186 | package managers install "on Linux the shell files" | AUR and Homebrew install all four; the Nix flake installs the binary, the shims generator, and completion only | parent README edit |
+| E10 | OVERSTATED | 246 | a usage error prints help and exits 2 | some usage errors (`--dry-run --uninstall`, a malformed `--version`) print one line, no help | parent README edit |
+| E11 | OVERSTATED | 315 | uninstall leaves empty directories | Linux removes an empty share dir and Windows an empty install dir; other directories may remain | parent README edit |
+
+Untestable here and worth a README note: the tag-pinned URLs (lines 30-32, 155) serve the new installers only after `v0.2.0` is tagged from a `main` that holds this branch (plan D8).
+
+### C11d (fixes E1, E7, both installers), owner `nappy`
+
+`scripts/installer/sh/mcp.sh`, `scripts/installer/ps1/mcp.ps1`, `tests/install-mcp.test.mjs`, `tests/install-ps1-mcp.test.mjs`. VS Code: when the user `mcp.json` exists without a `snipset` entry, call `code --add-mcp` (VS Code merges into its own file) instead of reporting it registered. Check: an OpenCode or Cursor file that exists without a `snipset` entry (kept at install) reports `[KEEP] <id>: <file> exists without snipset; not managed by the installer`, which is not drift. Mirror both in `mcp.ps1` where the behaviour differs. Tests: the E1 reproduction (an `mcp.json` without snipset makes `code --add-mcp` run once); the E7 reproduction (pre-existing `opencode.json` without snipset: install `[KEEP]`, check exit 0).
 
 ## Reviewer G: PR hygiene and scope
 
