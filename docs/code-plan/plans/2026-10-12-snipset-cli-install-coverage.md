@@ -651,7 +651,10 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] C15b ps1 install hardening (C1, C4 to C8, C11). Evidence: hoggy RED 11 fail with C1 and C4 reproduced, amended for loopback http (C15c finding), GREEN six ps1 suites; parent regenerated `install.ps1`: 95 pass across six ps1 suites, `install.Tests.ps1` passes, real-asset suite 4 pass, `build.mjs --check` exit 0; commit `cb41743`.
   - [x] C15c ps1 uninstall ownership and Gemini parse (C2, C3, C8 to C10, C12). Evidence: chef RED 10 fail with C2 and C3 reproduced exactly, GREEN 62 pass; parent private bundle 81 pass across five ps1 suites; commit `953f916`.
   - [x] C11c sh Gemini strict match (C3). Evidence: nappy RED 2 fail (C3 reproduction and nested object), the dot tests proven by a temporary unescaped-regex mutation, GREEN 47 pass; parent regenerated `install.sh`: 179 pass across twelve Linux suites, shellcheck exit 0, no drift; commit `fb07602`.
-  - [ ] Review wave 3 (before the PR): README claim check, lifecycle state machine, PR hygiene.
+  - [ ] Review wave 3 (before the PR): README claim check, lifecycle state machine, PR hygiene. Findings in `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/review-wave-3.md`.
+  - [ ] C10b fish and env file ownership (F1 P1, F2)
+  - [ ] C07c refuse a foreign binary before placing (F3, Linux)
+  - [ ] C15d refuse a foreign exe before placing (F3, Windows)
 - [ ] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0.
 - [ ] Deliver: commits staged by explicit path under the owner identity, no co-author trailer; PR body written to a file and opened with `--body-file`; `pr-registry.mjs pr install-coverage --number <N>`.
 - [ ] Sweep: session-close debt sweep, learning ledger, graph index, plan closeout decision.
