@@ -629,9 +629,9 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] T11 MCP six harnesses. Evidence: chef RED 11 fail, GREEN 11 pass; `claude mcp add/get/remove --help` read with a throwaway HOME and a read-only `claude mcp get` probe; parent bundle 111 pass across nine suites; `build.mjs --check --target sh` exit 0 afterwards; commit `ff07a9b`. Unverified: codex, gemini, VS Code output formats (CLIs absent) and gemini `--db` forwarding without `--`.
   - [x] T12 sh lifecycle modes. Evidence: hoggy RED 7 fail, GREEN lifecycle 10 pass; amended mid-run (uninstall follows the `--with-mcp` list); parent regenerated `install.sh` and ran all eleven Linux suites: 136 pass, 1 fail, the fail being `install.ps1` drift from C14's uncommitted ps1 edits, not this chunk; one MCP assertion updated to exit 1 after `[FAIL]`; bundle shellcheck exit 0; commit `d46cc10`.
   - [x] T13 ps1 CLI contract. Evidence: nappy RED 12 fail, GREEN 16 pass (a counter mutation turned its test red); parent regenerated `install.ps1`, reran cli and install ps1 suites (16 pass), `installer-build -t ps1` (5 pass), `install.Tests.ps1` passes; no `$script:` and no `exit` in the parts; commit `a89fd64`.
-  - [ ] T14 ps1 platform, offline, smoke
+  - [x] T14 ps1 platform, offline, smoke. Evidence: chef RED 19 fail (re-proved after two test-harness fixes), GREEN 35 pass; parent private ps1 bundle 35 pass across platform, install, cli; decision table 7 of 7; commit `87de112`. Not verified: Windows itself (branches exercised by redefinition on Linux). Debt: the ps1 side does not accept the `*` marker in `SHA256SUMS` (the sh side does).
   - [ ] T15 ps1 path and lifecycle
-  - [ ] T16 ps1 MCP
+  - [x] T16 ps1 MCP. Evidence: nappy RED 13 fail, GREEN 13 pass; an escaping mutation turned the legacy-quoting test red; parent private bundle 48 pass across four ps1 suites; commit `e048166`. Mirrors the pre-review Linux rules, so C15 calls MCP only with `-WithMcp` (A6) and C16b ports the C11b scope rules (A3, A4).
   - [x] T17 manifest renderer. Evidence: nappy RED exit 1 (24 fail, 1 pass on a fixture-only test), GREEN 25 pass; parent rerun exit 0, 25 pass, 0 fail; `render.mjs` (232 lines) read in full; `cmp packaging/SHA256SUMS` against the real Draft file: identical; commit `9b3ce1b`. Accepted deviations: `if`/`then` support (the Scoop schema uses it) and unknown schema keywords reported as errors, not ignored.
   - [x] T18 Scoop bucket. Evidence: nappy RED 11 fail, GREEN 11 pass; parent rerun exit 0; `render.mjs --check --channel scoop` exit 0; `bucket/` holds only `snipset.json`; commit `715dfd0`.
   - [x] T19 winget manifests. Evidence: hoggy RED 16 fail, GREEN 16 pass, mutation (removed `NestedInstallerType`) turned 2 tests red; parent rerun exit 0; `--check --channel winget` exit 0; commit `4cb11e2`. Finding: the 1.12.0 schemas have no top-level `additionalProperties: false`, so the test asserts each field by name.
@@ -645,6 +645,7 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] C11b MCP scope-safe removal (fixes A3, A4, A6)
   - [ ] C12b safe startup-file rewrites and keeps (fixes A1, A7 to A10)
   - [ ] C06b archive and fetch hardening (fixes B1 to B7, B9)
+  - [ ] C16b ps1 MCP scope-safe removal (A3, A4 parity with C11b)
   - [ ] Review wave 2 (after W6): independent read-only review of the Windows parts and the manifests.
   - [ ] Review wave 3 (before the PR): README claim check, lifecycle state machine, PR hygiene.
 - [ ] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0.
