@@ -23,6 +23,10 @@ Also add the install directory to the user PATH.
 Register the snipset MCP server with these harnesses: claude, codex, gemini, opencode, cursor, vscode,
 or all. Accepts one comma-separated string or several strings.
 
+.PARAMETER Database
+Path to the Snipset database that registered MCP servers should use (passed as --db). The Windows form
+of install.sh --db. Defaults to the CLI's own location.
+
 .PARAMETER From
 Install from a local directory holding SHA256SUMS and the release zip instead of downloading.
 
@@ -48,7 +52,8 @@ Installs v0.2.0 into $env:LOCALAPPDATA\Snipset\bin and adds that directory to th
 
 Prints the steps for installing v0.1.0 and registering MCP for Claude Code and Codex, without writing anything.
 #>
-[CmdletBinding()]
+# Named only: -Db is the alias of the common -Debug, so "-Db x" would otherwise quietly bind x to -Version.
+[CmdletBinding(PositionalBinding = $false)]
 param(
   [string]$Version,
   [string]$InstallDir,
@@ -58,5 +63,6 @@ param(
   [switch]$DryRun,
   [switch]$Check,
   [switch]$Update,
-  [switch]$Uninstall
+  [switch]$Uninstall,
+  [string]$Database
 )

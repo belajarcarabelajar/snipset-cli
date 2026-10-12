@@ -1,6 +1,24 @@
 # The called functions read these locals and the parameters through dynamic scoping, never a script-scope prefix:
 # the README one-liner runs install.ps1 as a scriptblock, where the script scope is the caller's session.
 
+function Assert-SnipsetDatabase {
+  param([string]$Database)
+  # install.sh refuses the same character in --db.
+  if ($Database -match '"') { throw "install.ps1: the database path must not contain `" (got $Database)" }
+}
+
+# Mirrors db_check in install.sh. There is no init step on Windows, so the file is only reported.
+function Test-SnipsetDatabase {
+  param([string]$Database)
+  if (-not $Database) {
+    Write-SnipsetReport -Status SKIP -Item 'database' -Detail 'the CLI default'
+  } elseif (Test-Path -LiteralPath $Database) {
+    Write-SnipsetReport -Status OK -Item 'database' -Detail $Database
+  } else {
+    Write-SnipsetReport -Status MISSING -Item 'database' -Detail $Database
+  }
+}
+
 function Test-SnipsetExe {
   param([string]$InstallDir)
   $exe = Join-Path $InstallDir 'snipset.exe'
@@ -63,6 +81,7 @@ function Remove-SnipsetInstallDir {
 
 function Invoke-SnipsetInstall {
   param([string[]]$McpIds = @())
+  Assert-SnipsetDatabase -Database $Database
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0; zip = $null }
   $Version = Resolve-SnipsetVersion
   $archive = "snipset-cli-$Version-$target.zip"
@@ -79,7 +98,8 @@ function Invoke-SnipsetInstall {
     Invoke-SnipsetAction -Description "check the entries of $archive" -Action { Test-SnipsetArchive -Zip $run.zip }
     Invoke-SnipsetAction -Description "install snipset.exe to $exe" -Action { Install-SnipsetBinary -Zip $run.zip -Stage $stage -InstallDir $InstallDir }
     if ($AddPath) { Invoke-SnipsetAction -Description "add $InstallDir to the user PATH" -Action { Install-SnipsetPathEnv -Dir $InstallDir } }
-    foreach ($id in $McpIds) { Invoke-SnipsetAction -Description "register the snipset MCP server for $id" -Action { Install-SnipsetMcp -Ids @($id) -Bin $exe } }
+    $dbNote = if ($Database) { " with --db $Database" } else { '' }
+    foreach ($id in $McpIds) { Invoke-SnipsetAction -Description "register the snipset MCP server for $id$dbNote" -Action { Install-SnipsetMcp -Ids @($id) -Bin $exe -Db $Database } }
     if ($run.fail -gt 0) { throw "install: $($run.fail) steps failed" }
     if ($DryRun) { Write-Output 'dry run: nothing was written' } else { Write-Output "Installed snipset $Version to $exe" }
   } finally {
@@ -90,8 +110,10 @@ function Invoke-SnipsetInstall {
 
 function Invoke-SnipsetCheck {
   param([string[]]$McpIds = @())
+  Assert-SnipsetDatabase -Database $Database
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }
   Test-SnipsetExe -InstallDir $InstallDir
+  Test-SnipsetDatabase -Database $Database
   if ($AddPath) { Test-SnipsetPathEnv -Dir $InstallDir }
   if ($McpIds.Count) {
     Test-SnipsetMcp -Ids $McpIds -Bin (Join-Path $InstallDir 'snipset.exe')
@@ -106,6 +128,7 @@ function Invoke-SnipsetCheck {
 
 function Invoke-SnipsetUpdate {
   param([string[]]$McpIds = @())
+  Assert-SnipsetDatabase -Database $Database
   if ($DryRun) {
     Invoke-SnipsetInstall -McpIds $McpIds
     return
@@ -124,10 +147,11 @@ function Invoke-SnipsetUninstall {
   param([string[]]$McpIds = @())
   # The remove functions delete for real, so there is nothing safe to preview.
   if ($DryRun) { throw 'install.ps1: -DryRun cannot preview -Uninstall; run -Check to see what is installed' }
+  Assert-SnipsetDatabase -Database $Database
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }
   $exe = Join-Path $InstallDir 'snipset.exe'
   if ($McpIds.Count) {
-    Remove-SnipsetMcp -Ids $McpIds -Bin $exe
+    Remove-SnipsetMcp -Ids $McpIds -Bin $exe -Db $Database
   } else {
     Write-SnipsetReport -Status SKIP -Item 'mcp' -Detail 'no -WithMcp list'
   }

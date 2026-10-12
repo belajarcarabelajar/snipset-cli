@@ -15,7 +15,7 @@ if (pwshSkip) console.warn(`skipping install.ps1 CLI tests: ${pwshSkip}`);
 const bundle = installerPath("ps1");
 const libPart = process.env.SNIPSET_PS1_LIB ?? fileURLToPath(new URL("../scripts/installer/ps1/lib.ps1", import.meta.url));
 const ALL_MCP = ["claude", "codex", "gemini", "opencode", "cursor", "vscode"];
-const PARAMS = ["Version", "InstallDir", "AddPath", "WithMcp", "From", "DryRun", "Check", "Update", "Uninstall"];
+const PARAMS = ["Version", "InstallDir", "AddPath", "WithMcp", "From", "DryRun", "Check", "Update", "Uninstall", "Database"];
 const USAGE = "use only one of -Check, -Update, -Uninstall";
 const DRY_END = "dry run: nothing was written";
 
