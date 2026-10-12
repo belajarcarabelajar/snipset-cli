@@ -1,13 +1,73 @@
 # shellcheck shell=bash disable=SC2034,SC2154
 shell_marker='# snipset-terminal-integration (managed by snipset installer; safe to remove)'
+shell_kept=()
+shell_why=""
+# Prints the sha256 the share-dir manifest lists for NAME, or nothing.
+shell_listed_sum() {
+  local manifest="${share_dir}/.snipset-bundle"
+  [[ -f "$manifest" ]] || return 0
+  awk -v n="$1" 'NF == 2 && $2 == n { print $1; exit }' "$manifest" 2>/dev/null || true
+}
+# Sets shell_why to "" when NAME in share_dir is the installer's own file, "changed"
+# when the manifest lists it under another sha256, and "foreign" otherwise.
+shell_ownership() {
+  local path="${share_dir}/$1" manifest="${share_dir}/.snipset-bundle" want sum
+  shell_why=foreign
+  [[ -f "$path" && ! -L "$path" ]] || return 0
+  if [[ ! -e "$manifest" && ! -L "$manifest" ]]; then
+    # Installs older than the manifest wrote only the default share dir's files.
+    if [[ "$share_dir" == "${HOME}/.local/share/snipset" ]]; then
+      shell_why=""
+    fi
+    return 0
+  fi
+  want="$(shell_listed_sum "$1")"
+  [[ -n "$want" ]] || return 0
+  sum="$(sha256_of "$path" 2>/dev/null)" || sum=""
+  if [[ "$sum" == "$want" ]]; then
+    shell_why=""
+  else
+    shell_why=changed
+  fi
+}
+# Replaces the manifest instead of writing through it, so a symlink there is not followed.
+shell_manifest_write() {
+  local manifest="${share_dir}/.snipset-bundle" new
+  if new="$(mktemp "${manifest}.XXXXXX" 2>/dev/null)" && printf '%s' "$1" > "$new" && mv -f -- "$new" "$manifest"; then
+    return 0
+  fi
+  [[ -z "${new:-}" ]] || rm -f -- "$new"
+  report FAIL 'shell manifest' "${manifest} could not be written"
+}
 shell_bundle_place() {
-  local name
+  local name path want lines=""
+  shell_kept=()
   if ((do_shell)) && ((has_shell)); then
     mkdir -p "$share_dir"
     for name in snipset.sh completion.bash tab.sh; do
-      cp -f "${stage}/shell/${name}" "${share_dir}/${name}"
-      chmod 755 "${share_dir}/${name}"
+      path="${share_dir}/${name}"
+      if [[ -e "$path" || -L "$path" ]]; then
+        shell_ownership "$name"
+        if [[ -n "$shell_why" ]] && [[ ! -L "$path" && -f "$path" ]] && cmp -s -- "${stage}/shell/${name}" "$path"; then
+          shell_why=""
+        fi
+        if [[ -n "$shell_why" ]]; then
+          report KEEP "shell ${name}" "${path} was not written by the installer"
+          shell_kept+=("$name")
+          # A kept edit stays listed, so the manifest outlives it and the default
+          # share dir never falls back to overwriting it.
+          want="$(shell_listed_sum "$name")"
+          if [[ -n "$want" ]]; then
+            lines+="${want}  ${name}"$'\n'
+          fi
+          continue
+        fi
+      fi
+      cp -f "${stage}/shell/${name}" "$path"
+      chmod 755 "$path"
+      lines+="$(sha256_of "$path")  ${name}"$'\n'
     done
+    shell_manifest_write "$lines"
   elif ((do_shell)); then
     note 'release predates the shell bundle; skipping shell integration'
   fi
@@ -24,6 +84,11 @@ shell_block_lines() {
 }
 shell_block_add() {
   if ((do_shell)) && ((has_shell)); then
+    # Same rule as pathenv.sh for env: never source at login a file the installer did not write.
+    if ((${#shell_kept[@]})); then
+      report SKIP 'shell block' "${bashrc} left unchanged; not written by the installer in ${share_dir}: ${shell_kept[*]}"
+      return 0
+    fi
     touch "$bashrc"
     if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
       {
@@ -69,17 +134,23 @@ shell_block_scan() {
   done
 }
 shell_check() {
-  local name
+  local name path
   if ! ((do_shell)); then
     report SKIP shell 'not requested (--no-shell)'
     return 0
   fi
   for name in snipset.sh completion.bash tab.sh; do
-    if [[ -f "${share_dir}/${name}" ]]; then
-      report OK "shell ${name}" "${share_dir}/${name}"
-    else
-      report MISSING "shell ${name}" "${share_dir}/${name}"
+    path="${share_dir}/${name}"
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+      report MISSING "shell ${name}" "$path"
+      continue
     fi
+    shell_ownership "$name"
+    case "$shell_why" in
+      '') report OK "shell ${name}" "$path" ;;
+      changed) report DRIFT "shell ${name}" "${path}: changed since the installer wrote it" ;;
+      *) report DRIFT "shell ${name}" "${path}: not written by the installer" ;;
+    esac
   done
   shell_block_scan
   if ((shell_block_at < 0)); then
@@ -90,23 +161,48 @@ shell_check() {
     report DRIFT 'shell block' "${bashrc} holds the marker with other lines"
   fi
 }
+shell_manifest_remove() {
+  local manifest="${share_dir}/.snipset-bundle" name remaining=0
+  [[ -f "$manifest" && ! -L "$manifest" ]] || return 0
+  for name in snipset.sh completion.bash tab.sh; do
+    if [[ -n "$(shell_listed_sum "$name")" ]] && [[ -e "${share_dir}/${name}" || -L "${share_dir}/${name}" ]]; then
+      remaining=1
+    fi
+  done
+  if ((remaining)); then
+    report KEEP 'shell manifest' "${manifest}: listed files remain"
+  else
+    rm -f -- "$manifest"
+    report REMOVED 'shell manifest' "$manifest"
+  fi
+}
 shell_remove() {
-  local name i start end out=""
+  local name path i start end out=""
   # Without the shell bundle these names may hold the user's own files.
   if ! ((do_shell)); then
     report SKIP shell '--no-shell, nothing to remove'
     return 0
   fi
   for name in snipset.sh completion.bash tab.sh; do
-    if [[ -L "${share_dir}/${name}" ]]; then
-      report KEEP "shell ${name}" "${share_dir}/${name} symlink left in place"
-    elif [[ -f "${share_dir}/${name}" ]]; then
-      rm -f "${share_dir}/${name}"
-      report REMOVED "shell ${name}" "${share_dir}/${name}"
-    else
-      report SKIP "shell ${name}" "${share_dir}/${name} absent"
+    path="${share_dir}/${name}"
+    if [[ -L "$path" ]]; then
+      report KEEP "shell ${name}" "${path} symlink left in place"
+      continue
+    elif [[ ! -e "$path" ]]; then
+      report SKIP "shell ${name}" "${path} absent"
+      continue
     fi
+    shell_ownership "$name"
+    case "$shell_why" in
+      '')
+        rm -f -- "$path"
+        report REMOVED "shell ${name}" "$path"
+        ;;
+      changed) report KEEP "shell ${name}" "${path} changed since the installer wrote it; remove it by hand" ;;
+      *) report KEEP "shell ${name}" "${path} was not written by the installer" ;;
+    esac
   done
+  shell_manifest_remove
   shell_block_scan
   if ((shell_block_at < 0)); then
     report SKIP 'shell block' "none in ${bashrc}"

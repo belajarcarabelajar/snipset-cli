@@ -1,5 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, symlinkSync } from "node:fs";
 import { rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -276,4 +277,127 @@ test("an init failure other than an existing database is still shown", { skip: p
     res.stderr,
   );
   assert.ok(!existsSync(join(roDir, "snipset.db")));
+});
+
+const MANIFEST = ".snipset-bundle";
+const USER_TAB = "# my tab\n";
+
+function releaseWith(sb, shellStubs) {
+  const release = fakeLinuxRelease({ shellStubs });
+  cleanups.push(() => rm(release.dir, { recursive: true, force: true }));
+  downloaderShims(sb, release);
+}
+
+function sandboxOnly() {
+  const sb = makeSandbox();
+  cleanups.push(() => cleanupSandbox(sb));
+  return sb;
+}
+
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function userTabShare(sb) {
+  const share = join(sb.home, "mystuff");
+  mkdirSync(share);
+  writeFileSync(join(share, "tab.sh"), USER_TAB);
+  return share;
+}
+
+test("share dir manifest: a user's tab.sh in a custom --share-dir survives install and uninstall", async () => {
+  const { sb, bashrc } = setup();
+  const share = userTabShare(sb);
+  const tab = join(share, "tab.sh");
+  const res = await install(sb, ["--share-dir", share]);
+  assert.equal(readFileSync(tab, "utf8"), USER_TAB, "install overwrote the user's tab.sh");
+  assert.deepEqual(reportLines(res.stdout, "shell tab.sh"), [`[KEEP] shell tab.sh: ${tab} was not written by the installer`]);
+  assert.equal(reportLines(res.stdout, "shell block").length, 1, res.stdout);
+  assert.match(reportLines(res.stdout, "shell block")[0], /^\[SKIP\] shell block: .*tab\.sh/);
+  assert.ok(!existsSync(bashrc) || !readFileSync(bashrc, "utf8").includes(MARKER), "bashrc block written");
+  const un = await runInstaller(sb, [...FLAGS, "--share-dir", share, "--uninstall"]);
+  assert.equal(un.code, 0, `${un.stdout}\n${un.stderr}`);
+  assert.equal(existsSync(tab) && readFileSync(tab, "utf8"), USER_TAB, "uninstall deleted or changed the user's tab.sh");
+  assert.equal(reportLines(un.stdout, "shell tab.sh").length, 1, un.stdout);
+  assert.match(reportLines(un.stdout, "shell tab.sh")[0], /^\[KEEP\] shell tab\.sh: /);
+  assert.deepEqual(readdirSync(share), ["tab.sh"]);
+});
+
+test("share dir manifest: release B's shell bytes replace release A's (control)", async () => {
+  const sb = sandboxOnly();
+  const share = join(sb.home, "mystuff");
+  releaseWith(sb, { "snipset.sh": "# snipset A\n", "tab.sh": "# tab A\n" });
+  await install(sb, ["--share-dir", share]);
+  const b = { "snipset.sh": "# snipset B\n", "completion.bash": "# completion B\n", "tab.sh": "# tab B\n" };
+  releaseWith(sb, b);
+  const res = await install(sb, ["--share-dir", share]);
+  for (const name of SHARE_FILES) assert.equal(readFileSync(join(share, name), "utf8"), b[name], `${name} kept release A's bytes`);
+  assert.doesNotMatch(res.stdout, /^\[KEEP\] shell /m);
+  assert.ok(readFileSync(join(sb.home, ".bashrc"), "utf8").includes(MARKER), "block missing");
+});
+
+test("share dir manifest: a user edit to an installed file is kept on uninstall", async () => {
+  const { sb, shareDir } = setup();
+  await install(sb);
+  const tab = join(shareDir, "tab.sh");
+  const edited = "# tab.sh fixture\n# my edit\n";
+  writeFileSync(tab, edited);
+  const res = await runInstaller(sb, [...FLAGS, "--uninstall"]);
+  assert.equal(res.code, 0, `${res.stdout}\n${res.stderr}`);
+  assert.equal(existsSync(tab) && readFileSync(tab, "utf8"), edited, "uninstall deleted the edited tab.sh");
+  assert.equal(reportLines(res.stdout, "shell tab.sh").length, 1, res.stdout);
+  assert.match(reportLines(res.stdout, "shell tab.sh")[0], /^\[KEEP\] shell tab\.sh: /);
+  for (const name of ["snipset.sh", "completion.bash"]) assert.ok(!existsSync(join(shareDir, name)), `${name} survived`);
+  assert.ok(existsSync(join(shareDir, MANIFEST)), "manifest removed while a listed file remains");
+});
+
+test("share dir manifest: the default share dir without a manifest still upgrades", async () => {
+  const sb = sandboxOnly();
+  const shareDir = join(sb.home, ".local", "share", "snipset");
+  releaseWith(sb, { "tab.sh": "# tab A\n" });
+  await install(sb);
+  await rm(join(shareDir, MANIFEST), { force: true });
+  const b = { "snipset.sh": "# snipset B\n", "completion.bash": "# completion B\n", "tab.sh": "# tab B\n" };
+  releaseWith(sb, b);
+  const res = await install(sb);
+  for (const name of SHARE_FILES) assert.equal(readFileSync(join(shareDir, name), "utf8"), b[name], `${name} not upgraded`);
+  assert.doesNotMatch(res.stdout, /^\[KEEP\] shell /m);
+  const want = SHARE_FILES.map((name) => `${sha256(b[name])}  ${name}\n`).join("");
+  assert.equal(existsSync(join(shareDir, MANIFEST)) && readFileSync(join(shareDir, MANIFEST), "utf8"), want);
+});
+
+test("share dir manifest: --check names a kept file", async () => {
+  const { sb } = setup();
+  const share = userTabShare(sb);
+  await install(sb, ["--share-dir", share]);
+  const res = await runInstaller(sb, [...FLAGS, "--share-dir", share, "--check"]);
+  assert.equal(res.code, 1, `${res.stdout}\n${res.stderr}`);
+  const tab = join(share, "tab.sh");
+  assert.deepEqual(reportLines(res.stdout, "shell tab.sh"), [`[DRIFT] shell tab.sh: ${tab}: not written by the installer`]);
+  assert.deepEqual(reportLines(res.stdout, "shell snipset.sh"), [`[OK] shell snipset.sh: ${join(share, "snipset.sh")}`]);
+});
+
+test("share dir manifest: a kept edit survives a reinstall, an uninstall, and another install", async () => {
+  const { sb, shareDir } = setup();
+  await install(sb);
+  const tab = join(shareDir, "tab.sh");
+  const edited = "# tab.sh fixture\n# my edit\n";
+  writeFileSync(tab, edited);
+  await install(sb);
+  const un = await runInstaller(sb, [...FLAGS, "--uninstall"]);
+  assert.equal(un.code, 0, `${un.stdout}\n${un.stderr}`);
+  const res = await install(sb);
+  assert.equal(readFileSync(tab, "utf8"), edited, "the default share dir fell back to overwriting the edit");
+  assert.deepEqual(reportLines(res.stdout, "shell tab.sh"), [`[KEEP] shell tab.sh: ${tab} was not written by the installer`]);
+});
+
+test("share dir manifest: a custom share dir without a manifest is adopted when its files match the release", async () => {
+  const { sb } = setup();
+  const share = join(sb.home, "mystuff");
+  mkdirSync(share);
+  for (const name of SHARE_FILES) writeFileSync(join(share, name), `# ${name} fixture\n`);
+  const res = await install(sb, ["--share-dir", share]);
+  assert.doesNotMatch(res.stdout, /^\[KEEP\] shell /m);
+  assert.ok(existsSync(join(share, MANIFEST)), "manifest not written");
+  assert.ok(readFileSync(join(sb.home, ".bashrc"), "utf8").includes(MARKER), "block missing");
 });
