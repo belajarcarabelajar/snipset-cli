@@ -328,7 +328,7 @@ Rules for every chunk (carried from the install-coverage contracts and `MEMORY.m
 - [x] Explore: three read-only grounding reports (Linux items, Windows and Homebrew items, vivera L11), 2026-10-12.
 - [x] Intent: owner answers recorded in section 1.
 - [x] Plan gate: owner answered `Approve and execute (Recommended)` on 2026-10-12.
-- [ ] T01 helper v2 and R4
+- [x] T01 helper v2 and R4. Evidence: RED `-t 'helper v2:'` exit 1 (matched 0, then 0 pass 8 fail with options ignored and `runInstallerPiped`/`linkTools` not functions); GREEN sandbox suite 36 pass, platform suite 23 pass with identical sorted names (junit), smoke of install, shell, mcp, ps1-mcp suites 82 pass; `useStarMarker` gone; helper 447 lines.
 - [ ] T02 L1 share-dir manifest
 - [ ] T03 L2 created-dirs record
 - [ ] T04 L3 stdin pipe test

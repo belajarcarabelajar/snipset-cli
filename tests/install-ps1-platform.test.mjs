@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -221,16 +221,9 @@ test("-From a dir without the named zip fails naming the missing file", { skip: 
   });
 });
 
-// fakeWindowsRelease writes `<hex>  <name>`; `sha256sum -b` writes `<hex> *<name>`.
-function useStarMarker(rel, name = rel.assetName) {
-  const hex = readFileSync(rel.sums, "utf8").slice(0, 64);
-  writeFileSync(rel.sums, `${hex} *${name}\n`);
-}
-
 test("-From a SHA256SUMS entry with the binary-mode marker installs without -Version", { skip: zipSkip, timeout: 60000 }, async () => {
   await withWorkspace(async ({ env, installDir, release, requests }) => {
-    const rel = release({ version: "0.1.0" });
-    useStarMarker(rel);
+    const rel = release({ version: "0.1.0", starMarker: true });
     const r = await pwsh(["-File", bundle, "-From", rel.dir, "-InstallDir", installDir], { ...env, SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" });
     assert.equal(r.code, 0, r.stdout + r.stderr);
     assert.match(lines(r.stdout).at(-1), /^Installed snipset v0\.1\.0 to /);
@@ -241,8 +234,7 @@ test("-From a SHA256SUMS entry with the binary-mode marker installs without -Ver
 
 test("-From a binary-mode marker entry with a wrong hash fails with checksum mismatch", { skip: zipSkip, timeout: 60000 }, async () => {
   await withWorkspace(async ({ env, installDir, release }) => {
-    const rel = release({ version: "0.1.0", badHash: true });
-    useStarMarker(rel);
+    const rel = release({ version: "0.1.0", badHash: true, starMarker: true });
     const r = await pwsh(["-File", bundle, "-From", rel.dir, "-InstallDir", installDir], { ...env, SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" });
     assert.equal(r.code, 1, r.stdout + r.stderr);
     assert.ok(stderrHas(r, "install.ps1: checksum mismatch"), r.stderr);
@@ -252,8 +244,7 @@ test("-From a binary-mode marker entry with a wrong hash fails with checksum mis
 
 test("-From a binary-mode marker entry for a longer file name is not the archive's checksum", { skip: zipSkip, timeout: 60000 }, async () => {
   await withWorkspace(async ({ env, installDir, release }) => {
-    const rel = release({ version: "0.1.0" });
-    useStarMarker(rel, `old-${rel.assetName}`);
+    const rel = release({ version: "0.1.0", starMarker: true, sumsName: (name) => `old-${name}` });
     const r = await pwsh(["-File", bundle, "-From", rel.dir, "-Version", "0.1.0", "-InstallDir", installDir], { ...env, SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" });
     assert.equal(r.code, 1, r.stdout + r.stderr);
     assert.ok(stderrHas(r, "install.ps1: checksum entry missing"), r.stderr);
@@ -263,8 +254,7 @@ test("-From a binary-mode marker entry for a longer file name is not the archive
 
 test("a downloaded SHA256SUMS entry with the binary-mode marker is accepted", { skip: zipSkip, timeout: 60000 }, async () => {
   await withWorkspace(async ({ env, installDir, release }) => {
-    const rel = release({ version: "0.1.0" });
-    useStarMarker(rel);
+    const rel = release({ version: "0.1.0", starMarker: true });
     const served = new Map(["SHA256SUMS", rel.assetName].map((name) => [`/${rel.tag}/${name}`, join(rel.dir, name)]));
     const mirror = Bun.serve({
       hostname: "127.0.0.1",
