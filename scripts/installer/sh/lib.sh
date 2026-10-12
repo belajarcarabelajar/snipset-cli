@@ -5,6 +5,11 @@
 # trigger), and generated trigger shims. Every setup step is idempotent and
 # strictly opt-out; only the binary install itself is mandatory.
 set -euo pipefail
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  # mapfile and empty arrays under set -u need 4.4; note and die are not defined yet.
+  printf 'install.sh: bash 4.4 or newer is required; this is bash %s\n' "${BASH_VERSION}" >&2
+  exit 1
+fi
 n_drift=0
 n_kept=0
 n_removed=0

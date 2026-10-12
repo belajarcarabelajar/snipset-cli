@@ -1,22 +1,24 @@
 # shellcheck shell=bash disable=SC2034,SC2154
 binary_verify() {
-  local dir="$1" expected actual entry
+  local dir="$1" expected actual entry names verbose
   expected="$(awk -v name="$archive" '{ fname=$2; sub(/^[*]/, "", fname); if (fname == name) { print $1 } }' "${dir}/SHA256SUMS")"
   [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || die 'checksum entry missing'
   actual="$(sha256_of "${dir}/${archive}")"
   [[ "$actual" == "$expected" ]] || die 'checksum mismatch'
+  # Captured, not streamed: a tar that fails to list must stop the install, not read as an empty archive.
+  names="$(tar --quoting-style=escape -tzf "${dir}/${archive}")" || die 'cannot list the archive'
+  verbose="$(tar --quoting-style=escape -tvzf "${dir}/${archive}")" || die 'cannot list the archive'
   while IFS= read -r entry; do
     [[ "$entry" != *$'\n'* ]] || die 'unsafe archive entry'
     [[ "$entry" != -* && "$entry" != .-* && "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'unsafe archive entry'
-  done < <(tar --quoting-style=escape -tzf "${dir}/${archive}")
-  if tar -tvzf "${dir}/${archive}" | awk '$1 ~ /^l/ { found=1 } END { exit found ? 0 : 1 }'; then
-    die 'symlinks are not allowed in release archives'
-  fi
+  done <<< "$names"
+  [[ $'\n'"$verbose" != *$'\n'l* ]] || die 'symlinks are not allowed in release archives'
 }
 binary_stage() {
   mkdir -p "$install_dir"
   stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
-  tar -xzf "${1}/${archive}" -C "$stage"
+  # As root, tar would otherwise keep the packer's uid and mode bits.
+  tar --no-same-owner --no-same-permissions -xzf "${1}/${archive}" -C "$stage"
   [[ -f "${stage}/snipset" && -x "${stage}/snipset" ]] || { note 'archive has no executable snipset'; rm -rf "$stage"; exit 1; }
   chmod 755 "${stage}/snipset"
 }

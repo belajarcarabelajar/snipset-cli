@@ -4,11 +4,14 @@ fetch_tools_require() {
   if [[ -z "$from_dir" ]] && ! command -v curl >/dev/null && ! command -v wget >/dev/null; then
     die 'curl or wget is required'
   fi
+  if [[ -z "$from_dir" && "$base_url" != https://* ]]; then
+    die "SNIPSET_RELEASE_BASE_URL must start with https:// (got ${base_url}); use --from DIR for local files"
+  fi
   command -v sha256sum >/dev/null || command -v shasum >/dev/null || command -v openssl >/dev/null ||
     die 'sha256sum, shasum, or openssl is required'
 }
 fetch_get() {
-  local curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
+  local curl_opts=(--proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
   if command -v curl >/dev/null; then
     curl -fsSL "${curl_opts[@]}" "$1" -o "$2"
   else
@@ -16,7 +19,7 @@ fetch_get() {
   fi
 }
 fetch_text() {
-  local curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
+  local curl_opts=(--proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
   if command -v curl >/dev/null; then
     curl -fsSL "${curl_opts[@]}" "$1"
   else

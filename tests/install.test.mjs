@@ -85,6 +85,7 @@ async function fakeRelease({
     }
   }
   await run("tar", ["-czf", archive, "-C", staging, ...members]);
+  await rm(staging, { recursive: true, force: true });
   const hash = (await run("sha256sum", [archive])).stdout.split(/\s+/)[0];
   const sums = join(dir, "SHA256SUMS");
   // GNU coreutils writes a binary-mode marker (`*`) before the filename when
@@ -380,6 +381,8 @@ test("curl calls carry retry and stall limits", async () => {
       ["--connect-timeout", "15"],
       ["--speed-limit", "1024"],
       ["--speed-time", "60"],
+      ["--proto", "=https"],
+      ["--proto-redir", "=https"],
     ];
     for (const call of calls) {
       const args = call.split(" ");
