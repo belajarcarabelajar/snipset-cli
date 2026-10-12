@@ -6,24 +6,39 @@
 # trigger), and generated trigger shims. Every setup step is idempotent and
 # strictly opt-out; only the binary install itself is mandatory.
 set -euo pipefail
+n_drift=0
+n_kept=0
+n_removed=0
 note() { printf 'install.sh: %s\n' "$1" >&2; }
-repo="belajarcarabelajar/snipset-cli"
-version=""
-install_dir="${HOME}/.local/bin"
-share_dir="${HOME}/.local/share/snipset"
-bashrc="${HOME}/.bashrc"
-db=""
-add_path=0
-do_init=1
-do_shell=1
-do_shims=1
-do_mcp=0
-base_url="${SNIPSET_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
+die() {
+  note "$1"
+  exit "${2:-1}"
+}
+report() {
+  printf '[%s] %s: %s\n' "$1" "$2" "$3"
+  # Plain assignments: ((n++)) returns 1 when n was 0, which set -e treats as failure.
+  case "$1" in
+    DRIFT|MISSING) n_drift=$((n_drift + 1)) ;;
+    KEEP) n_kept=$((n_kept + 1)) ;;
+    REMOVED) n_removed=$((n_removed + 1)) ;;
+  esac
+}
+act() {
+  local desc="$1"
+  shift
+  if ((dry_run)); then
+    printf '[DRY] %s\n' "$desc"
+    return 0
+  fi
+  "$@"
+}
 print_usage() {
   cat <<'EOF'
 Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
                   [--share-dir DIR] [--db PATH] [--bashrc PATH]
                   [--no-init] [--no-shell] [--no-shims] [--with-mcp]
+                  [--with-mcp=LIST] [--from DIR] [--dry-run]
+                  [--check | --update | --uninstall]
                   [--help]
 
   --version VERSION  Release to install (default: latest).
@@ -36,6 +51,12 @@ Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
   --no-shell         Skip shell integration.
   --no-shims         Skip generating trigger shims.
   --with-mcp         Write ~/.config/opencode/opencode.json if absent.
+  --with-mcp=LIST    Register MCP for LIST: claude,codex,gemini,opencode,cursor,vscode or all.
+  --from DIR         Install from SHA256SUMS and the archive in DIR (no download).
+  --dry-run          Print every step and write nothing.
+  --check            Report drift of an install made with the same flags (exit 1 on drift).
+  --update           Install the latest (or --version) release over the current one.
+  --uninstall        Remove what an install with the same flags wrote.
   --help, -h         Show this help and exit.
 EOF
 }
@@ -43,143 +64,382 @@ usage() {
   print_usage >&2
   exit 2
 }
-while (($#)); do
-  case "$1" in
-    --version) [[ $# -ge 2 ]] || usage; version="$2"; shift 2 ;;
-    --install-dir) [[ $# -ge 2 ]] || usage; install_dir="$2"; shift 2 ;;
-    --share-dir) [[ $# -ge 2 ]] || usage; share_dir="$2"; shift 2 ;;
-    --db) [[ $# -ge 2 ]] || usage; db="$2"; shift 2 ;;
-    --bashrc) [[ $# -ge 2 ]] || usage; bashrc="$2"; shift 2 ;;
-    --add-path) add_path=1; shift ;;
-    --no-init) do_init=0; shift ;;
-    --no-shell) do_shell=0; shift ;;
-    --no-shims) do_shims=0; shift ;;
-    --with-mcp) do_mcp=1; shift ;;
-    --help|-h) print_usage; exit 0 ;;
-    *) usage ;;
-  esac
-done
-for path_value in "$install_dir" "$share_dir" "$bashrc" "$db"; do
-  # shellcheck disable=SC1003 # '\' is a literal backslash pattern, not a quote escape
-  case "$path_value" in
-    *$'\n'*|*$'\r'*|*'"'*|*'`'*|*'\'*|*'$'*)
-      echo 'install.sh: path must not contain newline or shell-special characters (" ` \ $)' >&2; exit 2 ;;
-  esac
-done
-target="x86_64-unknown-linux-gnu"
-command -v curl >/dev/null || { echo 'install.sh: curl is required' >&2; exit 1; }
-command -v tar >/dev/null || { echo 'install.sh: tar is required' >&2; exit 1; }
-command -v sha256sum >/dev/null || { echo 'install.sh: sha256sum is required' >&2; exit 1; }
-curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
-if [[ -z "$version" ]]; then
-  version="$(curl -fsSL "${curl_opts[@]}" "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: release version was not found' >&2; exit 1; }
-else
-  [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: invalid version' >&2; exit 2; }
-  [[ "$version" == v* ]] || version="v${version}"
-fi
-archive="snipset-cli-${version}-${target}.tar.gz"
-release_url="${base_url}/${version}"
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/snipset-install.XXXXXX")"
-cleanup() { rm -rf "$tmp" "${stage:-}"; }
-trap cleanup EXIT
-curl -fsSL "${curl_opts[@]}" "${release_url}/SHA256SUMS" -o "${tmp}/SHA256SUMS"
-curl -fsSL "${curl_opts[@]}" "${release_url}/${archive}" -o "${tmp}/${archive}"
-expected="$(awk -v name="$archive" '{ fname=$2; sub(/^[*]/, "", fname); if (fname == name) { print $1 } }' "${tmp}/SHA256SUMS")"
-[[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { echo 'install.sh: checksum entry missing' >&2; exit 1; }
-actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
-[[ "$actual" == "$expected" ]] || { echo 'install.sh: checksum mismatch' >&2; exit 1; }
-while IFS= read -r entry; do
-  [[ "$entry" != *$'\n'* ]] || { echo 'install.sh: unsafe archive entry' >&2; exit 1; }
-  [[ "$entry" != -* && "$entry" != .-* && "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || { echo 'install.sh: unsafe archive entry' >&2; exit 1; }
-done < <(tar --quoting-style=escape -tzf "${tmp}/${archive}")
-if tar -tvzf "${tmp}/${archive}" | awk '$1 ~ /^l/ { found=1 } END { exit found ? 0 : 1 }'; then
-  echo 'install.sh: symlinks are not allowed in release archives' >&2; exit 1
-fi
-mkdir -p "$install_dir"
-stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
-tar -xzf "${tmp}/${archive}" -C "$stage"
-[[ -f "${stage}/snipset" && -x "${stage}/snipset" ]] || { echo 'install.sh: archive has no executable snipset' >&2; rm -rf "$stage"; exit 1; }
-chmod 755 "${stage}/snipset"
-mv -f "${stage}/snipset" "${install_dir}/snipset"
-# The shell bundle (shell/snipset.sh, shell/completion.bash, shell/tab.sh,
-# shell/snipset-shims.sh) ships with newer releases. Older archives carry the
-# binary only; setup steps below degrade to a binary-only install.
-has_shell=0
-if [[ -f "${stage}/shell/snipset.sh" && -f "${stage}/shell/completion.bash" && -f "${stage}/shell/tab.sh" && -f "${stage}/shell/snipset-shims.sh" ]]; then
-  has_shell=1
-  chmod 755 "${stage}/shell/snipset-shims.sh"
-  mv -f "${stage}/shell/snipset-shims.sh" "${install_dir}/snipset-shims"
-fi
-if ((add_path)); then
-  profile="${HOME}/.profile"
-  line="export PATH=\"${install_dir}:\$PATH\""
-  touch "$profile"
-  grep -Fqx "$line" "$profile" || printf '\n%s\n' "$line" >> "$profile"
-fi
-snipset_bin="${install_dir}/snipset"
-if ((do_shell)) && ((has_shell)); then
-  mkdir -p "$share_dir"
-  for name in snipset.sh completion.bash tab.sh; do
-    cp -f "${stage}/shell/${name}" "${share_dir}/${name}"
-    chmod 755 "${share_dir}/${name}"
+parse_args() {
+  local raw id wanted known=" claude codex gemini opencode cursor vscode " path_value
+  local -a ids
+  repo="belajarcarabelajar/snipset-cli"
+  version=""
+  install_dir="${HOME}/.local/bin"
+  share_dir="${HOME}/.local/share/snipset"
+  bashrc="${HOME}/.bashrc"
+  db=""
+  add_path=0
+  do_init=1
+  do_shell=1
+  do_shims=1
+  mcp_list=""
+  from_dir=""
+  mode="install"
+  dry_run=0
+  base_url="${SNIPSET_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
+  wanted=" "
+  while (($#)); do
+    case "$1" in
+      --version) [[ $# -ge 2 ]] || usage; version="$2"; shift 2 ;;
+      --install-dir) [[ $# -ge 2 ]] || usage; install_dir="$2"; shift 2 ;;
+      --share-dir) [[ $# -ge 2 ]] || usage; share_dir="$2"; shift 2 ;;
+      --db) [[ $# -ge 2 ]] || usage; db="$2"; shift 2 ;;
+      --bashrc) [[ $# -ge 2 ]] || usage; bashrc="$2"; shift 2 ;;
+      --from) [[ $# -ge 2 ]] || usage; from_dir="$2"; shift 2 ;;
+      --add-path) add_path=1; shift ;;
+      --no-init) do_init=0; shift ;;
+      --no-shell) do_shell=0; shift ;;
+      --no-shims) do_shims=0; shift ;;
+      --with-mcp|--with-mcp=) wanted+="opencode "; shift ;;
+      --with-mcp=*)
+        raw="${1#--with-mcp=}"
+        # read -a drops a trailing empty field, so check for empty ids first.
+        [[ ",${raw}," != *,,* ]] || usage
+        IFS=',' read -r -a ids <<< "$raw"
+        for id in "${ids[@]}"; do
+          if [[ "$id" == all ]]; then
+            wanted+="${known# }"
+          elif [[ "$known" == *" ${id} "* ]]; then
+            wanted+="${id} "
+          else
+            usage
+          fi
+        done
+        shift ;;
+      --dry-run) dry_run=1; shift ;;
+      --check|--update|--uninstall)
+        [[ "$mode" == install ]] || usage
+        mode="${1#--}"
+        shift ;;
+      --help|-h) print_usage; exit 0 ;;
+      *) usage ;;
+    esac
   done
-  touch "$bashrc"
-  if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
-    {
-      printf '\n# snipset-terminal-integration (managed by snipset installer; safe to remove)\n'
-      # shellcheck disable=SC2016 # $PATH is written literally into .bashrc
-      printf 'if ! command -v snipset >/dev/null 2>&1; then export PATH="%s:$PATH"; fi\n' "$install_dir"
-      printf '[ -f "%s/snipset.sh" ] && . "%s/snipset.sh"\n' "$share_dir" "$share_dir"
-      printf '[ -f "%s/completion.bash" ] && . "%s/completion.bash"\n' "$share_dir" "$share_dir"
-      printf '[ -f "%s/tab.sh" ] && . "%s/tab.sh"\n' "$share_dir" "$share_dir"
-    } >> "$bashrc"
+  # Canonical order without duplicates, whatever order or repeats the flags used.
+  for id in $known; do
+    [[ "$wanted" != *" ${id} "* ]] || mcp_list+="${mcp_list:+ }${id}"
+  done
+  for path_value in "$install_dir" "$share_dir" "$bashrc" "$db" "$from_dir"; do
+    # shellcheck disable=SC1003 # '\' is a literal backslash pattern, not a quote escape
+    case "$path_value" in
+      *$'\n'*|*$'\r'*|*'"'*|*'`'*|*'\'*|*'$'*)
+        die 'path must not contain newline or shell-special characters (" ` \ $)' 2 ;;
+    esac
+  done
+}
+platform_require() {
+  target="x86_64-unknown-linux-gnu"
+}
+platform_glibc_version() {
+  :
+}
+fetch_tools_require() {
+  command -v curl >/dev/null || die 'curl is required'
+  command -v tar >/dev/null || die 'tar is required'
+  command -v sha256sum >/dev/null || die 'sha256sum is required'
+}
+fetch_get() {
+  local curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
+  curl -fsSL "${curl_opts[@]}" "$1" -o "$2"
+}
+fetch_text() {
+  local curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
+  curl -fsSL "${curl_opts[@]}" "$1"
+}
+sha256_of() {
+  sha256sum "$1" | awk '{print $1}'
+}
+fetch_resolve_version() {
+  if [[ -z "$version" ]]; then
+    version="$(fetch_text "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die 'release version was not found'
+  else
+    [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die 'invalid version' 2
+    [[ "$version" == v* ]] || version="v${version}"
   fi
-elif ((do_shell)); then
-  echo 'install.sh: release predates the shell bundle; skipping shell integration' >&2
-fi
-rm -rf "$stage"
-setup_path=(PATH="${install_dir}:${PATH}")
-if ((do_init)); then
-  if [[ -n "$db" ]]; then
-    if ! env "${setup_path[@]}" "$snipset_bin" --db "$db" init; then
-      note "database init skipped (already exists or unreachable); run 'snipset doctor' to check"
+  archive="snipset-cli-${version}-${target}.tar.gz"
+  release_url="${base_url}/${version}"
+}
+fetch_release() {
+  fetch_get "${release_url}/SHA256SUMS" "${1}/SHA256SUMS"
+  fetch_get "${release_url}/${archive}" "${1}/${archive}"
+}
+binary_verify() {
+  local dir="$1" expected actual entry
+  expected="$(awk -v name="$archive" '{ fname=$2; sub(/^[*]/, "", fname); if (fname == name) { print $1 } }' "${dir}/SHA256SUMS")"
+  [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || die 'checksum entry missing'
+  actual="$(sha256_of "${dir}/${archive}")"
+  [[ "$actual" == "$expected" ]] || die 'checksum mismatch'
+  while IFS= read -r entry; do
+    [[ "$entry" != *$'\n'* ]] || die 'unsafe archive entry'
+    [[ "$entry" != -* && "$entry" != .-* && "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'unsafe archive entry'
+  done < <(tar --quoting-style=escape -tzf "${dir}/${archive}")
+  if tar -tvzf "${dir}/${archive}" | awk '$1 ~ /^l/ { found=1 } END { exit found ? 0 : 1 }'; then
+    die 'symlinks are not allowed in release archives'
+  fi
+}
+binary_stage() {
+  mkdir -p "$install_dir"
+  stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
+  tar -xzf "${1}/${archive}" -C "$stage"
+  [[ -f "${stage}/snipset" && -x "${stage}/snipset" ]] || { note 'archive has no executable snipset'; rm -rf "$stage"; exit 1; }
+  chmod 755 "${stage}/snipset"
+}
+binary_smoke() {
+  return 0
+}
+binary_place() {
+  mv -f "${stage}/snipset" "${install_dir}/snipset"
+  # The shell bundle (shell/snipset.sh, shell/completion.bash, shell/tab.sh,
+  # shell/snipset-shims.sh) ships with newer releases. Older archives carry the
+  # binary only; setup steps below degrade to a binary-only install.
+  has_shell=0
+  if [[ -f "${stage}/shell/snipset.sh" && -f "${stage}/shell/completion.bash" && -f "${stage}/shell/tab.sh" && -f "${stage}/shell/snipset-shims.sh" ]]; then
+    has_shell=1
+    chmod 755 "${stage}/shell/snipset-shims.sh"
+    mv -f "${stage}/shell/snipset-shims.sh" "${install_dir}/snipset-shims"
+  fi
+}
+binary_installed_version() {
+  :
+}
+binary_check() {
+  report SKIP binary 'not checked yet'
+}
+binary_remove() {
+  report SKIP binary 'not checked yet'
+}
+pathenv_add() {
+  local profile line
+  if ((add_path)); then
+    profile="${HOME}/.profile"
+    line="export PATH=\"${install_dir}:\$PATH\""
+    touch "$profile"
+    grep -Fqx "$line" "$profile" || printf '\n%s\n' "$line" >> "$profile"
+  fi
+}
+pathenv_check() {
+  report SKIP path 'not checked yet'
+}
+pathenv_remove() {
+  report SKIP path 'not checked yet'
+}
+shell_bundle_place() {
+  local name
+  if ((do_shell)) && ((has_shell)); then
+    mkdir -p "$share_dir"
+    for name in snipset.sh completion.bash tab.sh; do
+      cp -f "${stage}/shell/${name}" "${share_dir}/${name}"
+      chmod 755 "${share_dir}/${name}"
+    done
+  elif ((do_shell)); then
+    note 'release predates the shell bundle; skipping shell integration'
+  fi
+  rm -rf "$stage"
+}
+shell_block_add() {
+  if ((do_shell)) && ((has_shell)); then
+    touch "$bashrc"
+    if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
+      {
+        printf '\n# snipset-terminal-integration (managed by snipset installer; safe to remove)\n'
+        # shellcheck disable=SC2016 # $PATH is written literally into .bashrc
+        printf 'if ! command -v snipset >/dev/null 2>&1; then export PATH="%s:$PATH"; fi\n' "$install_dir"
+        printf '[ -f "%s/snipset.sh" ] && . "%s/snipset.sh"\n' "$share_dir" "$share_dir"
+        printf '[ -f "%s/completion.bash" ] && . "%s/completion.bash"\n' "$share_dir" "$share_dir"
+        printf '[ -f "%s/tab.sh" ] && . "%s/tab.sh"\n' "$share_dir" "$share_dir"
+      } >> "$bashrc"
     fi
-  else
-    if ! env "${setup_path[@]}" "$snipset_bin" init; then
-      note "database init skipped (already exists or unreachable); run 'snipset doctor' to check"
-    fi
   fi
-fi
-if ((do_shims)) && ((has_shell)); then
-  shim_out=""
-  shim_rc=0
-  if [[ -n "$db" ]]; then
-    shim_out="$(env "${setup_path[@]}" SNIPSET_DB="$db" "${install_dir}/snipset-shims" --dir "$install_dir" 2>&1)" || shim_rc=$?
-  else
-    shim_out="$(env "${setup_path[@]}" "${install_dir}/snipset-shims" --dir "$install_dir" 2>&1)" || shim_rc=$?
-  fi
-  if ((shim_rc != 0)); then
-    note "shim generation skipped; run 'snipset-shims' after fixing the database"
-  elif [[ -z "$shim_out" ]]; then
-    note "shim generator produced no output; run 'snipset-shims' to check triggers"
-  fi
-elif ((do_shims)); then
-  note "release predates the shell bundle; skipping shims"
-fi
-if ((do_mcp)); then
-  mcp_config="${HOME}/.config/opencode/opencode.json"
-  if [[ -f "$mcp_config" ]]; then
-    note "MCP config exists; leaving $mcp_config untouched"
-  else
-    mkdir -p "$(dirname "$mcp_config")"
+}
+shell_check() {
+  report SKIP shell 'not checked yet'
+}
+shell_remove() {
+  report SKIP shell 'not checked yet'
+}
+db_init() {
+  local snipset_bin="${install_dir}/snipset"
+  local setup_path=(PATH="${install_dir}:${PATH}")
+  if ((do_init)); then
     if [[ -n "$db" ]]; then
-      # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
-      printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp","--db","%s"],"enabled":true}}}\n' "$snipset_bin" "$db" > "$mcp_config"
+      if ! env "${setup_path[@]}" "$snipset_bin" --db "$db" init; then
+        note "database init skipped (already exists or unreachable); run 'snipset doctor' to check"
+      fi
     else
-      # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
-      printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp"],"enabled":true}}}\n' "$snipset_bin" > "$mcp_config"
+      if ! env "${setup_path[@]}" "$snipset_bin" init; then
+        note "database init skipped (already exists or unreachable); run 'snipset doctor' to check"
+      fi
     fi
   fi
-fi
-printf 'Installed snipset %s to %s\n' "$version" "${install_dir}/snipset"
+}
+db_check() {
+  report SKIP database 'not checked yet'
+}
+shims_generate() {
+  local setup_path=(PATH="${install_dir}:${PATH}")
+  local shim_out shim_rc
+  if ((do_shims)) && ((has_shell)); then
+    shim_out=""
+    shim_rc=0
+    if [[ -n "$db" ]]; then
+      shim_out="$(env "${setup_path[@]}" SNIPSET_DB="$db" "${install_dir}/snipset-shims" --dir "$install_dir" 2>&1)" || shim_rc=$?
+    else
+      shim_out="$(env "${setup_path[@]}" "${install_dir}/snipset-shims" --dir "$install_dir" 2>&1)" || shim_rc=$?
+    fi
+    if ((shim_rc != 0)); then
+      note "shim generation skipped; run 'snipset-shims' after fixing the database"
+    elif [[ -z "$shim_out" ]]; then
+      note "shim generator produced no output; run 'snipset-shims' to check triggers"
+    fi
+  elif ((do_shims)); then
+    note "release predates the shell bundle; skipping shims"
+  fi
+}
+shims_check() {
+  report SKIP shims 'not checked yet'
+}
+shims_remove() {
+  report SKIP shims 'not checked yet'
+}
+mcp_install() {
+  local snipset_bin="${install_dir}/snipset"
+  local mcp_config id
+  local -a ids
+  read -r -a ids <<< "$mcp_list"
+  for id in "${ids[@]}"; do
+    if [[ "$id" != opencode ]]; then
+      report SKIP "$id" 'not supported yet'
+      continue
+    fi
+    mcp_config="${HOME}/.config/opencode/opencode.json"
+    if [[ -f "$mcp_config" ]]; then
+      note "MCP config exists; leaving $mcp_config untouched"
+    else
+      mkdir -p "$(dirname "$mcp_config")"
+      if [[ -n "$db" ]]; then
+        # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
+        printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp","--db","%s"],"enabled":true}}}\n' "$snipset_bin" "$db" > "$mcp_config"
+      else
+        # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
+        printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp"],"enabled":true}}}\n' "$snipset_bin" > "$mcp_config"
+      fi
+    fi
+  done
+}
+mcp_check() {
+  local id
+  local -a ids
+  read -r -a ids <<< "$mcp_list"
+  for id in "${ids[@]}"; do
+    report SKIP "$id" 'not checked yet'
+  done
+}
+mcp_remove() {
+  local id
+  local -a ids
+  read -r -a ids <<< "$mcp_list"
+  for id in "${ids[@]}"; do
+    report SKIP "$id" 'not checked yet'
+  done
+}
+do_install() {
+  local id
+  local -a ids
+  if ((dry_run)); then
+    platform_require
+    printf '[DRY] %s\n' \
+      "platform: require ${target}" \
+      "tools: require curl, tar, sha256sum" \
+      "version: resolve ${version:-latest}" \
+      "release: download SHA256SUMS and the ${target} archive from ${base_url}" \
+      "verify: check the archive checksum and entries" \
+      "stage: extract into ${install_dir}/.snipset-stage.*" \
+      "smoke: run the staged binary" \
+      "binary: place ${install_dir}/snipset"
+    if ((add_path)); then
+      printf '[DRY] path: add %s to %s\n' "$install_dir" "${HOME}/.profile"
+    else
+      printf '[DRY] path: leave %s unchanged (no --add-path)\n' "${HOME}/.profile"
+    fi
+    if ((do_shell)); then
+      printf '[DRY] shell bundle: copy into %s\n' "$share_dir"
+      printf '[DRY] shell block: add to %s\n' "$bashrc"
+    else
+      printf '[DRY] shell bundle: skip %s (--no-shell)\n' "$share_dir"
+      printf '[DRY] shell block: skip %s (--no-shell)\n' "$bashrc"
+    fi
+    if ((do_init)); then
+      printf '[DRY] database: init %s\n' "${db:-the CLI default}"
+    else
+      printf '[DRY] database: skip (--no-init)\n'
+    fi
+    if ((do_shims)); then
+      printf '[DRY] shims: generate in %s\n' "$install_dir"
+    else
+      printf '[DRY] shims: skip (--no-shims)\n'
+    fi
+    read -r -a ids <<< "$mcp_list"
+    if ((${#ids[@]} == 0)); then
+      printf '[DRY] mcp: none requested\n'
+    fi
+    for id in "${ids[@]}"; do
+      printf '[DRY] mcp %s: register snipset\n' "$id"
+    done
+    printf 'dry run: nothing was written\n'
+    return 0
+  fi
+  platform_require
+  fetch_tools_require
+  fetch_resolve_version
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/snipset-install.XXXXXX")"
+  trap 'rm -rf "$tmp" "${stage:-}"' EXIT
+  fetch_release "$tmp"
+  binary_verify "$tmp"
+  binary_stage "$tmp"
+  binary_smoke
+  binary_place
+  pathenv_add
+  shell_bundle_place
+  shell_block_add
+  db_init
+  shims_generate
+  mcp_install
+  printf 'Installed snipset %s to %s\n' "$version" "${install_dir}/snipset"
+}
+do_check() {
+  binary_check
+  pathenv_check
+  shell_check
+  db_check
+  shims_check
+  mcp_check
+  if ((n_drift)); then
+    printf 'check: DRIFT (%d items)\n' "$n_drift"
+    return 1
+  fi
+  printf 'check: CURRENT\n'
+}
+do_update() {
+  do_install
+}
+do_uninstall() {
+  mcp_remove
+  shims_remove
+  shell_remove
+  pathenv_remove
+  binary_remove
+  printf 'uninstall: removed %d, kept %d\n' "$n_removed" "$n_kept"
+}
+parse_args "$@"
+case "$mode" in
+  install) do_install ;;
+  check) do_check ;;
+  update) do_update ;;
+  uninstall) do_uninstall ;;
+esac
