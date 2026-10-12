@@ -29,6 +29,8 @@ try {
   $expected = $Matches[1].ToLowerInvariant()
   $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
   if ($actual -ne $expected) { throw 'install.ps1: checksum mismatch' }
+  # Windows PowerShell 5.1 runs on .NET Framework, where ZipFile lives in this assembly.
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
   $zipArchive = [IO.Compression.ZipFile]::OpenRead($zip)
   try {
     foreach ($entry in $zipArchive.Entries) {
