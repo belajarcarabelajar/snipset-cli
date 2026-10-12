@@ -189,7 +189,7 @@ function Get-SnipsetFromVersion {
   param([string]$From)
   $sums = Join-Path $From 'SHA256SUMS'
   if (-not (Test-Path -LiteralPath $sums -PathType Leaf)) { throw "install.ps1: $sums is missing" }
-  $pattern = '^[0-9a-fA-F]{64}\s+snipset-cli-(v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?)-' + [regex]::Escape($target) + '\.zip$'
+  $pattern = '^[0-9a-fA-F]{64}\s+\*?snipset-cli-(v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?)-' + [regex]::Escape($target) + '\.zip$'
   $found = @(Get-Content -LiteralPath $sums | ForEach-Object { if ($_ -match $pattern) { $Matches[1] } } | Sort-Object -Unique)
   if ($found.Count -ne 1) { throw "install.ps1: expected one snipset-cli-v<VERSION>-$target.zip in $sums, found $($found.Count); pass -Version" }
   $found[0]
@@ -219,8 +219,10 @@ function Get-SnipsetRelease {
     Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/SHA256SUMS" -OutFile $sums
     Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/$archive" -OutFile $zip
   }
-  $line = Get-Content -LiteralPath $sums | Where-Object { $_ -match "\s$([regex]::Escape($archive))$" } | Select-Object -First 1
-  if (-not $line -or $line -notmatch '^([0-9a-fA-F]{64})\s+') { throw 'install.ps1: checksum entry missing' }
+  # `*` is the binary-mode marker that `sha256sum -b` writes before the name.
+  $entry = '^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($archive) + '$'
+  $line = Get-Content -LiteralPath $sums | Where-Object { $_ -match $entry } | Select-Object -First 1
+  if (-not $line -or $line -notmatch $entry) { throw 'install.ps1: checksum entry missing' }
   $expected = $Matches[1].ToLowerInvariant()
   $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
   if ($actual -ne $expected) { throw 'install.ps1: checksum mismatch' }

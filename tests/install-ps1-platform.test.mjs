@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -218,6 +218,73 @@ test("-From a dir without the named zip fails naming the missing file", { skip: 
     const r = await pwsh(["-File", bundle, "-From", rel.dir, "-Version", "0.3.0", "-InstallDir", installDir], { ...env, SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" });
     assert.equal(r.code, 1, r.stdout + r.stderr);
     assert.ok(stderrHas(r, "snipset-cli-v0.3.0-x86_64-pc-windows-msvc.zip is missing"), r.stderr);
+  });
+});
+
+// fakeWindowsRelease writes `<hex>  <name>`; `sha256sum -b` writes `<hex> *<name>`.
+function useStarMarker(rel, name = rel.assetName) {
+  const hex = readFileSync(rel.sums, "utf8").slice(0, 64);
+  writeFileSync(rel.sums, `${hex} *${name}\n`);
+}
+
+test("-From a SHA256SUMS entry with the binary-mode marker installs without -Version", { skip: zipSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir, release, requests }) => {
+    const rel = release({ version: "0.1.0" });
+    useStarMarker(rel);
+    const r = await pwsh(["-File", bundle, "-From", rel.dir, "-InstallDir", installDir], { ...env, SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" });
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.match(lines(r.stdout).at(-1), /^Installed snipset v0\.1\.0 to /);
+    assert.equal(await readFile(join(installDir, "snipset.exe"), "utf8"), "snipset.exe fixture 0.1.0\n");
+    assert.equal(requests(), 0);
+  });
+});
+
+test("-From a binary-mode marker entry with a wrong hash fails with checksum mismatch", { skip: zipSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir, release }) => {
+    const rel = release({ version: "0.1.0", badHash: true });
+    useStarMarker(rel);
+    const r = await pwsh(["-File", bundle, "-From", rel.dir, "-InstallDir", installDir], { ...env, SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" });
+    assert.equal(r.code, 1, r.stdout + r.stderr);
+    assert.ok(stderrHas(r, "install.ps1: checksum mismatch"), r.stderr);
+    assert.equal(existsSync(join(installDir, "snipset.exe")), false);
+  });
+});
+
+test("-From a binary-mode marker entry for a longer file name is not the archive's checksum", { skip: zipSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir, release }) => {
+    const rel = release({ version: "0.1.0" });
+    useStarMarker(rel, `old-${rel.assetName}`);
+    const r = await pwsh(["-File", bundle, "-From", rel.dir, "-Version", "0.1.0", "-InstallDir", installDir], { ...env, SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" });
+    assert.equal(r.code, 1, r.stdout + r.stderr);
+    assert.ok(stderrHas(r, "install.ps1: checksum entry missing"), r.stderr);
+    assert.equal(existsSync(join(installDir, "snipset.exe")), false);
+  });
+});
+
+test("a downloaded SHA256SUMS entry with the binary-mode marker is accepted", { skip: zipSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir, release }) => {
+    const rel = release({ version: "0.1.0" });
+    useStarMarker(rel);
+    const served = new Map(["SHA256SUMS", rel.assetName].map((name) => [`/${rel.tag}/${name}`, join(rel.dir, name)]));
+    const mirror = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const file = served.get(new URL(req.url).pathname);
+        return file ? new Response(Bun.file(file)) : new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      const r = await pwsh(["-File", bundle, "-Version", "0.1.0", "-InstallDir", installDir], {
+        ...env,
+        SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1",
+        SNIPSET_RELEASE_BASE_URL: `http://127.0.0.1:${mirror.port}`,
+      });
+      assert.equal(r.code, 0, r.stdout + r.stderr);
+      assert.equal(await readFile(join(installDir, "snipset.exe"), "utf8"), "snipset.exe fixture 0.1.0\n");
+    } finally {
+      mirror.stop(true);
+    }
   });
 });
 
