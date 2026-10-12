@@ -61,6 +61,7 @@ command -v curl >/dev/null || { echo 'install.sh: curl is required' >&2; exit 1;
 command -v tar >/dev/null || { echo 'install.sh: tar is required' >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo 'install.sh: sha256sum is required' >&2; exit 1; }
 for path_value in "$install_dir" "$share_dir" "$bashrc" "$db"; do
+  # shellcheck disable=SC1003 # '\' is a literal backslash pattern, not a quote escape
   case "$path_value" in
     *$'\n'*|*$'\r'*|*'"'*|*'`'*|*'\'*|*'$'*)
       echo 'install.sh: path must not contain newline or shell-special characters (" ` \ $)' >&2; exit 2 ;;
@@ -125,6 +126,7 @@ if ((do_shell)) && ((has_shell)); then
   if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
     {
       printf '\n# snipset-terminal-integration (managed by snipset installer; safe to remove)\n'
+      # shellcheck disable=SC2016 # $PATH is written literally into .bashrc
       printf 'if ! command -v snipset >/dev/null 2>&1; then export PATH="%s:$PATH"; fi\n' "$install_dir"
       printf '[ -f "%s/snipset.sh" ] && . "%s/snipset.sh"\n' "$share_dir" "$share_dir"
       printf '[ -f "%s/completion.bash" ] && . "%s/completion.bash"\n' "$share_dir" "$share_dir"
@@ -171,8 +173,10 @@ if ((do_mcp)); then
   else
     mkdir -p "$(dirname "$mcp_config")"
     if [[ -n "$db" ]]; then
+      # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
       printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp","--db","%s"],"enabled":true}}}\n' "$snipset_bin" "$db" > "$mcp_config"
     else
+      # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
       printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp"],"enabled":true}}}\n' "$snipset_bin" > "$mcp_config"
     fi
   fi
