@@ -44,4 +44,4 @@ Confirmed approaches:
 | Item | Destination | Why | Approval |
 |---|---|---|---|
 | Rules 1 to 5 | in-repo `MEMORY.md` (auto) | measured here; rule 1 is PowerShell-general | not required |
-| Rule 1 | `~/AGENTS.md` candidate | applies to every PowerShell script on this machine | asked separately (`Promote`) |
+| Rule 1 | `~/AGENTS.md` rule A28 | applies to every PowerShell script on this machine | approved 2026-10-12 (`Promote`); appended, backup `~/AGENTS.md.bak-20261012-ps-alias` |
