@@ -1,7 +1,7 @@
 ---
 schema: ultra-plan/v1
 plan_id: 2026-10-12-snipset-cli-install-coverage
-status: InProgress
+status: Complete
 version: 1
 runner_contract: true
 defaults:
@@ -737,7 +737,7 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] README claim corrections (E2 to E6, E8 to E11, the tag note) and the matrix assertion (G3). Evidence: parent edits read against the reviewer's evidence; README suite 16 pass with the stronger assertion; em dash scan clean; commit `eeaf0ac`.
 - [x] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0. Evidence: see T25 (all exit 0 at `2e4801a`).
 - [x] Deliver: commits staged by explicit path under the owner identity, no co-author trailer; PR body written to a file and opened with `--body-file`; `pr-registry.mjs pr install-coverage --number <N>`. Evidence: 59 commits under the owner identity, attribution scan 0; `git push -u origin` exit 0; `gh pr create --body-file docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/pr.md` opened #6; `pr-registry.mjs pr install-coverage --number 6` recorded `open #6`; CI (author's evidence) green on both runs.
-- [ ] Sweep: session-close debt sweep, learning ledger, graph index, plan closeout decision.
+- [x] Sweep: session-close debt sweep, learning ledger, graph index, plan closeout decision.
   - [x] Sweep question asked; the owner selected all five follow-ups (F01 to F05). Record: `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/debt-sweep.md`.
   - [x] F01 archive entry gaps. Evidence: RED on a HEAD bundle exit 1 (11 pass, 4 fail: `..` and `x/..` reached GNU tar, `./-x` and the hard link were staged); GREEN: `bun test tests/install-archive.test.mjs tests/install-binary.test.mjs tests/install.test.mjs tests/install-lifecycle.test.mjs` exit 0, 63 pass; each guard removed alone turns only its own test red; real v0.2.0 archive (six regular files) `install-real-assets` 4 pass; `build.mjs --check --target sh`, `bash -n`, `shellcheck -S warning` exit 0.
   - [x] F02 quiet reinstall message. Evidence: RED on a HEAD bundle exit 1 (0 pass, 2 fail: the stub's raw `already exists` line relayed, and a `Permission denied` line relayed without the installer prefix); GREEN on HEAD plus `db.sh`: `bun test tests/install-shell.test.mjs tests/install.test.mjs tests/install-lifecycle.test.mjs` all pass; `bash -n` and `shellcheck -S warning` exit 0.
@@ -745,6 +745,8 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] F04 dedupe MCP stubs. Evidence: `bun test tests/install-mcp.test.mjs tests/install-ps1-mcp.test.mjs` exit 0 before and after, 25 and 25 pass per file; sorted test-name lists identical; every line from the first `test(` to the end of each file hashes identical to HEAD; `tests/install-ps1-mcp.test.mjs` 538 to 425 lines (the sweep's 503 was stale), `tests/install-mcp.test.mjs` 476 to 364, new `tests/helpers/mcp-stubs.mjs` 131.
   - [x] F05 pin symlinked shims. Evidence: `bun test tests/install-shims.test.mjs` exit 0, 10 pass; mutation (line 38 without `! -L`, private bundle) exit 1, 9 pass 1 fail, the new test failing with `ENOENT lstat .../,k1`.
   - [x] Re-verification after F01 to F05 at `f7978a6`. Evidence: `SNIPSET_REAL_ASSETS=<assets> ultra-plan-runner.mjs <plan> --execute` exit 0 (T01 to T24 and F01 to F05 SKIPPED-IDEMPOTENT, T25 PASSED, empty error ledger); `bun test --timeout 60000 tests/` exit 0 (522 pass, 6 skip, 0 fail); restricted PATH exit 0 (387 pass, 141 skip, 0 fail); `install-real-assets` 4 pass; `tests/install.Tests.ps1` passed; PKGBUILD `shellcheck --shell=bash --exclude=SC2034,SC2154,SC2164` exit 0. Re-pass: no new NOW item (`debt-sweep.md` section 5).
+  - [x] Close plan (2026-10-12). Evidence: `SNIPSET_REAL_ASSETS=<assets> bun ~/vivera/scripts/plan-closeout.mjs --readiness <plan>` exit 3, verdict `NEEDS-HUMAN`: 29 tasks DONE (T01 to T24, F01 to F05), T25 UNPROVEN (`skip_if: "false"` sentinel; its proof is the runner's T25 PASSED at `f7978a6`), open NOW follow-ups 0. The owner answered `Mark Complete` at the `Close plan` gate; status set to `Complete` on the session branch before the merge. `plan-closeout.mjs --audit` lists four bcb plans and none from this repository.
+  - [x] Graph index (2026-10-12, worktree, `graphify-out/` gitignored). Evidence: `graphify update .` exit 0 (1143 nodes, 2084 edges); `bun ~/vivera/scripts/graphify-sync.mjs --root "$(pwd)"` exit 0, 30 documents, 1143 to 1416 nodes, ghost source files 0; `--check --root "$(pwd)"` exit 0 after this line was written and synced.
 
 ## 1. Intent Lock (approved at Gate 1, 2026-10-12)
 
