@@ -227,6 +227,8 @@ nix run github:belajarcarabelajar/snipset-cli
 
 The package is marked `unfree` because of the EULA in `LICENSE`. The flake imports nixpkgs with `allowUnfree = true` for its own package, so you do not change your Nix config for it. This was not run, because nix is not installed on the test machine.
 
+Maintainers: every manifest above is rendered from `packaging/VERSION` and `packaging/SHA256SUMS` by `bun scripts/packaging/render.mjs`, and `--check` fails when a committed file differs. After changing the version, delete the previous version's folder under `packaging/winget/manifests` before running `--check`.
+
 ## Version managers
 
 These read the GitHub release directly and install the binary only.

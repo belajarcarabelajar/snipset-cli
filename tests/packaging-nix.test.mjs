@@ -161,7 +161,7 @@ describe("nix flake", () => {
     const flake = readFlake();
     expect(flake).toContain('sourceRoot = ".";');
     expect(flake).toContain("nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.installShellFiles ];");
-    expect(flake).toContain("buildInputs = [ pkgs.openssl pkgs.zlib pkgs.brotli pkgs.zstd pkgs.stdenv.cc.cc.lib ];");
+    expect(flake).toContain("buildInputs = [ pkgs.openssl pkgs.stdenv.cc.cc.lib ];");
   });
 
   test("installPhase installs both commands and the bash completion", () => {

@@ -19,7 +19,7 @@
         # The tarball holds the binary at its root and one directory, shell/, which unpack would enter.
         sourceRoot = ".";
         nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.installShellFiles ];
-        buildInputs = [ pkgs.openssl pkgs.zlib pkgs.brotli pkgs.zstd pkgs.stdenv.cc.cc.lib ];
+        buildInputs = [ pkgs.openssl pkgs.stdenv.cc.cc.lib ];
         installPhase = ''
           runHook preInstall
           install -Dm755 snipset $out/bin/snipset
