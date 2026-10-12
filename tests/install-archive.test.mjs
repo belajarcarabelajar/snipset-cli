@@ -2,7 +2,7 @@ import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -113,6 +113,42 @@ const UNSAFE_MEMBERS = [
     },
     member: "../escape",
     pattern: /unsafe archive entry/,
+  },
+  {
+    name: "a member named exactly ..",
+    prepare: (stage) => {
+      writeFileSync(join(stage, "dd"), "dot-dot member\n");
+      return ["-P", "--transform=s,^dd$,..,", "dd"];
+    },
+    member: "..",
+    pattern: /unsafe archive entry/,
+  },
+  {
+    name: "a member ending in /..",
+    prepare: (stage) => {
+      writeFileSync(join(stage, "dd"), "dot-dot member\n");
+      return ["-P", "--transform=s,^dd$,x/..,", "dd"];
+    },
+    member: "x/..",
+    pattern: /unsafe archive entry/,
+  },
+  {
+    name: "a member named ./-x",
+    prepare: (stage) => {
+      writeFileSync(join(stage, "-x"), "option-shaped member\n");
+      return ["./-x"];
+    },
+    member: "./-x",
+    pattern: /unsafe archive entry/,
+  },
+  {
+    name: "a hard-link member",
+    prepare: (stage) => {
+      linkSync(join(stage, "snipset"), join(stage, "hl"));
+      return ["hl"];
+    },
+    member: "hl",
+    pattern: /hard links are not allowed/,
   },
   {
     name: "a symlink member",

@@ -321,9 +321,11 @@ binary_verify() {
   verbose="$(tar --quoting-style=escape -tvzf "${dir}/${archive}")" || die 'cannot list the archive'
   while IFS= read -r entry; do
     [[ "$entry" != *$'\n'* ]] || die 'unsafe archive entry'
-    [[ "$entry" != -* && "$entry" != .-* && "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'unsafe archive entry'
+    [[ "$entry" != -* && "$entry" != .-* && "$entry" != ./-* && "$entry" != /* ]] || die 'unsafe archive entry'
+    [[ "$entry" != .. && "$entry" != ../* && "$entry" != */.. && "$entry" != */../* ]] || die 'unsafe archive entry'
   done <<< "$names"
   [[ $'\n'"$verbose" != *$'\n'l* ]] || die 'symlinks are not allowed in release archives'
+  [[ $'\n'"$verbose" != *$'\n'h* ]] || die 'hard links are not allowed in release archives'
 }
 binary_stage() {
   mkdir -p "$install_dir"
