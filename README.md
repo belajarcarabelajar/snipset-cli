@@ -127,6 +127,8 @@ bash install-snipset.sh --from snipset-assets --add-path
 
 A second run does not add the line twice. `--uninstall` removes the exact line from each file, and deletes the env files when they still match what the installer wrote.
 
+If `<share-dir>/env`, `<share-dir>/env.fish`, or the fish file already exists and was not written by the installer, it is kept: the installer prints `[KEEP]` with the line to add by hand, and adds no source line that would run your file.
+
 Older installers wrote `export PATH="<install-dir>:$PATH"` into `~/.profile`. That line has no marker and may be your own, so uninstall keeps it and prints a hint: `[KEEP] path legacy line: ... remove it by hand if the old installer added it`.
 
 ## MCP registration
