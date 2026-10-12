@@ -92,8 +92,15 @@ shell_check() {
 }
 shell_remove() {
   local name i start end out=""
+  # Without the shell bundle these names may hold the user's own files.
+  if ! ((do_shell)); then
+    report SKIP shell '--no-shell, nothing to remove'
+    return 0
+  fi
   for name in snipset.sh completion.bash tab.sh; do
-    if [[ -f "${share_dir}/${name}" || -L "${share_dir}/${name}" ]]; then
+    if [[ -L "${share_dir}/${name}" ]]; then
+      report KEEP "shell ${name}" "${share_dir}/${name} symlink left in place"
+    elif [[ -f "${share_dir}/${name}" ]]; then
       rm -f "${share_dir}/${name}"
       report REMOVED "shell ${name}" "${share_dir}/${name}"
     else
@@ -119,8 +126,11 @@ shell_remove() {
       out="${out%$'\n'}"
     fi
     # Write in place: a symlinked bashrc must stay a symlink into its dotfiles repo.
-    printf '%s' "$out" > "$bashrc"
-    report REMOVED 'shell block' "$bashrc"
+    if rewrite_from "$bashrc" printf '%s' "$out"; then
+      report REMOVED 'shell block' "$bashrc"
+    else
+      rewrite_fail 'shell block' "$bashrc"
+    fi
   fi
   rmdir "$share_dir" 2>/dev/null || true
 }

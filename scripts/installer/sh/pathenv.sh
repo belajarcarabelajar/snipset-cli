@@ -52,19 +52,16 @@ pathenv_line_add() {
   grep -Fqx -- "$line" "$1" || printf '\n%s\n' "$line" >> "$1"
 }
 # Drops each exact line and the blank line written just before it, rewriting in place to keep symlinks.
+# Returns 1 when FILE holds no such line and 2 when FILE could not be rewritten.
 pathenv_strip() {
-  local tmp_file
   if ! { [[ -f "$1" ]] && grep -Fqx -- "$2" "$1"; }; then
     return 1
   fi
-  tmp_file="$(mktemp "${TMPDIR:-/tmp}/snipset-path.XXXXXX")"
-  PATHENV_TARGET="$2" awk '
+  rewrite_from "$1" env PATHENV_TARGET="$2" awk '
     $0 == ENVIRON["PATHENV_TARGET"] { if (held && prev != "") print prev; held = 0; next }
     { if (held) print prev; prev = $0; held = 1 }
     END { if (held) print prev }
-  ' "$1" > "$tmp_file"
-  cat "$tmp_file" > "$1"
-  rm -f "$tmp_file"
+  ' "$1"
 }
 pathenv_add() {
   local file conf
@@ -131,26 +128,36 @@ pathenv_check() {
 }
 pathenv_remove_managed() {
   [[ -e "$2" || -L "$2" ]] || return 1
-  if pathenv_same "$2" "$3"; then
-    rm -f "$2"
+  if ! pathenv_same "$2" "$3"; then
+    report KEEP "$1" "$2 edited; remove it by hand"
+  elif rm -f -- "$2" 2>/dev/null && [[ ! -e "$2" ]]; then
     report REMOVED "$1" "$2"
   else
-    report KEEP "$1" "$2 edited; remove it by hand"
+    report FAIL "$1" "$2 could not be removed"
+    pathenv_failed=1
   fi
 }
 pathenv_remove() {
-  local file line legacy conf found=0
+  local file line legacy conf rc found=0 seen=$'\n'
+  pathenv_failed=0
   line="$(pathenv_source_line)"
   legacy="export PATH=\"${install_dir}:\$PATH\""
   pathenv_collect_bash
   for file in "${HOME}/.profile" "${pathenv_bash[@]}" "$(pathenv_zshenv)" "${HOME}/.zshenv"; do
-    if pathenv_strip "$file" "$line"; then
-      report REMOVED 'path line' "$file"
-      found=1
-    fi
+    # Without ZDOTDIR ~/.zshenv is listed twice, and a failed rewrite must report once.
+    [[ "$seen" != *$'\n'"$file"$'\n'* ]] || continue
+    seen+="${file}"$'\n'
+    rc=0
+    pathenv_strip "$file" "$line" || rc=$?
+    case "$rc" in
+      0) report REMOVED 'path line' "$file" ;;
+      2) rewrite_fail 'path line' "$file"; pathenv_failed=1 ;;
+    esac
+    ((rc == 1)) || found=1
   done
-  if pathenv_strip "${HOME}/.profile" "$legacy"; then
-    report REMOVED 'path legacy line' "${HOME}/.profile"
+  # Unmarked, so it may be the user's own line rather than the old installer's.
+  if [[ -f "${HOME}/.profile" ]] && grep -Fqx -- "$legacy" "${HOME}/.profile"; then
+    report KEEP 'path legacy line' "${HOME}/.profile: remove it by hand if the old installer added it"
     found=1
   fi
   conf="$(pathenv_fish_conf)"
@@ -160,8 +167,15 @@ pathenv_remove() {
     fi
     [[ "$conf" != "${HOME}/.config/fish/conf.d/snipset.fish" ]] || break
   done
-  pathenv_remove_managed 'path env' "${share_dir}/env" "$(pathenv_env_text; printf x)" && found=1
-  pathenv_remove_managed 'path env.fish' "${share_dir}/env.fish" "$(pathenv_fish_env_text; printf x)" && found=1
+  # A line or fish file that stayed still sources these, and a missing file aborts a dash login.
+  if ((pathenv_failed)); then
+    for file in "${share_dir}/env" "${share_dir}/env.fish"; do
+      [[ ! -e "$file" ]] || report KEEP "path ${file##*/}" "${file} is still sourced; rerun --uninstall once the failed files are writable"
+    done
+  else
+    pathenv_remove_managed 'path env' "${share_dir}/env" "$(pathenv_env_text; printf x)" && found=1
+    pathenv_remove_managed 'path env.fish' "${share_dir}/env.fish" "$(pathenv_fish_env_text; printf x)" && found=1
+  fi
   ((found)) || report SKIP path 'nothing to remove'
   rmdir "$share_dir" 2>/dev/null || true
 }

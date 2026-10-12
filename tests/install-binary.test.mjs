@@ -2,7 +2,7 @@ import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -245,4 +245,23 @@ test("uninstall skips a binary and generator that are absent", async () => {
   assert.equal(result.code, 0, result.stderr);
   assert.ok(lineStarting(result.stdout, "[SKIP] binary:"), result.stdout);
   assert.ok(lineStarting(result.stdout, "[SKIP] snipset-shims:"), result.stdout);
+});
+
+test("uninstall keeps a symlinked snipset and snipset-shims in place", async () => {
+  const sb = sandbox();
+  const real = join(sb.home, "opt", "snipset");
+  const realGen = join(sb.home, "opt", "snipset-shims");
+  writeExecutable(real, OLD_BINARY);
+  writeExecutable(realGen, "#!/bin/sh\n# snipset-shims: generate trigger shims (user copy)\n");
+  mkdirSync(binDir(sb), { recursive: true });
+  const bin = join(binDir(sb), "snipset");
+  const gen = join(binDir(sb), "snipset-shims");
+  symlinkSync(real, bin);
+  symlinkSync(realGen, gen);
+  const result = await runInstaller(sb, ["--uninstall"]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(lineStarting(result.stdout, "[KEEP] binary:"), `[KEEP] binary: ${bin} symlink left in place`, result.stdout);
+  assert.equal(lineStarting(result.stdout, "[KEEP] snipset-shims:"), `[KEEP] snipset-shims: ${gen} symlink left in place`, result.stdout);
+  for (const link of [bin, gen]) assert.ok(lstatSync(link).isSymbolicLink(), `${link} was removed`);
+  assert.equal(readFileSync(real, "utf8"), OLD_BINARY);
 });

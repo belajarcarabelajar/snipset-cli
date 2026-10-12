@@ -33,3 +33,49 @@ act() {
   fi
   "$@"
 }
+rewrite_backup=""
+rewrite_restored=1
+# Replaces FILE's content with NEWFILE's in place, so FILE and a symlink to it stay
+# where they are. Returns 2 on any failure; rewrite_backup then names the kept copy
+# of the old content and rewrite_restored says whether FILE still matches it.
+rewrite_file() {
+  local file="$1" new="$2" bak="${1}.snipset-bak.$$"
+  rewrite_backup=""
+  rewrite_restored=1
+  if ! cp -- "$file" "$bak" 2>/dev/null || ! cmp -s -- "$file" "$bak"; then
+    rm -f -- "$bak" "$new"
+    return 2
+  fi
+  if cat -- "$new" 2>/dev/null > "$file" && cmp -s -- "$new" "$file"; then
+    rm -f -- "$bak" "$new"
+    return 0
+  fi
+  cat -- "$bak" 2>/dev/null > "$file" || true
+  cmp -s -- "$bak" "$file" || rewrite_restored=0
+  rewrite_backup="$bak"
+  rm -f -- "$new"
+  return 2
+}
+# Stages CMD's output beside FILE, never in TMPDIR, which may be missing or full,
+# then hands it to rewrite_file. Returns 2 before FILE is touched when staging fails.
+rewrite_from() {
+  local file="$1" new
+  shift
+  rewrite_backup=""
+  rewrite_restored=1
+  new="$(mktemp "${file}.snipset-new.XXXXXX" 2>/dev/null)" || return 2
+  if ! "$@" > "$new"; then
+    rm -f -- "$new"
+    return 2
+  fi
+  rewrite_file "$file" "$new"
+}
+rewrite_fail() {
+  if [[ -z "$rewrite_backup" ]]; then
+    report FAIL "$1" "$2 left unchanged"
+  elif ((rewrite_restored)); then
+    report FAIL "$1" "$2 left unchanged (backup: ${rewrite_backup})"
+  else
+    report FAIL "$1" "$2 could not be restored (backup: ${rewrite_backup})"
+  fi
+}

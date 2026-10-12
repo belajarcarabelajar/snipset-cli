@@ -1,6 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, symlinkSync } from "node:fs";
 import { rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -193,4 +193,55 @@ test("uninstall never touches the database", async () => {
   const after = [db, defaultDb].map((path) => [readFileSync(path, "utf8"), lstatSync(path).mtimeMs]);
   assert.deepEqual(after, before);
   assert.deepEqual(before.map(([content]) => content), ["precious custom", "precious default"]);
+});
+
+test("--no-shell uninstall leaves a user's tab.sh, the block, and the share dir", async () => {
+  const { sb, shareDir, bashrc } = setup();
+  writeFileSync(bashrc, USER_BEFORE);
+  await install(sb);
+  writeFileSync(join(shareDir, "tab.sh"), "# my own tab.sh\n");
+  const rc = readFileSync(bashrc, "utf8");
+  const res = await runInstaller(sb, [...FLAGS, "--uninstall", "--no-shell"]);
+  assert.equal(res.code, 0, `${res.stdout}\n${res.stderr}`);
+  assert.deepEqual(reportLines(res.stdout, "shell"), ["[SKIP] shell: --no-shell, nothing to remove"]);
+  assert.doesNotMatch(res.stdout, /^\[REMOVED\] shell /m);
+  assert.equal(readFileSync(join(shareDir, "tab.sh"), "utf8"), "# my own tab.sh\n");
+  for (const name of SHARE_FILES) assert.ok(existsSync(join(shareDir, name)), `${name} was removed`);
+  assert.equal(readFileSync(bashrc, "utf8"), rc);
+});
+
+test("uninstall keeps a symlinked share file and removes the regular ones", async () => {
+  const { sb, shareDir } = setup();
+  await install(sb);
+  const target = join(sb.home, "dotfiles", "tab.sh");
+  mkdirSync(join(sb.home, "dotfiles"));
+  writeFileSync(target, "# dotfiles tab.sh\n");
+  await unlink(join(shareDir, "tab.sh"));
+  symlinkSync(target, join(shareDir, "tab.sh"));
+  const res = await runInstaller(sb, [...FLAGS, "--uninstall"]);
+  assert.equal(res.code, 0, `${res.stdout}\n${res.stderr}`);
+  assert.deepEqual(reportLines(res.stdout, "shell tab.sh"), [
+    `[KEEP] shell tab.sh: ${join(shareDir, "tab.sh")} symlink left in place`,
+  ]);
+  assert.ok(lstatSync(join(shareDir, "tab.sh")).isSymbolicLink());
+  assert.equal(readFileSync(target, "utf8"), "# dotfiles tab.sh\n");
+  for (const name of ["snipset.sh", "completion.bash"]) assert.ok(!existsSync(join(shareDir, name)), `${name} survived`);
+});
+
+test("a read-only HOME keeps the shell block byte-identical and fails the uninstall", async () => {
+  const { sb, bashrc } = setup();
+  writeFileSync(bashrc, USER_BEFORE);
+  await install(sb);
+  const before = readFileSync(bashrc, "utf8");
+  chmodSync(sb.home, 0o555);
+  let res;
+  try {
+    res = await runInstaller(sb, [...FLAGS, "--uninstall"]);
+  } finally {
+    chmodSync(sb.home, 0o755);
+  }
+  assert.equal(readFileSync(bashrc, "utf8"), before, res.stdout);
+  assert.deepEqual(reportLines(res.stdout, "shell block"), [`[FAIL] shell block: ${bashrc} left unchanged`]);
+  assert.equal(res.code, 1, `${res.stdout}\n${res.stderr}`);
+  assert.deepEqual(readdirSync(sb.home).filter((name) => /\.snipset-(new|bak)\./.test(name)), []);
 });
