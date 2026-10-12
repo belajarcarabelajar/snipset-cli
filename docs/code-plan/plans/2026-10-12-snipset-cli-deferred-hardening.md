@@ -1,7 +1,7 @@
 ---
 schema: ultra-plan/v1
 plan_id: 2026-10-12-snipset-cli-deferred-hardening
-status: InProgress
+status: Complete
 version: 1
 runner_contract: true
 defaults:
@@ -361,7 +361,10 @@ Rules for every chunk (carried from the install-coverage contracts and `MEMORY.m
 - [x] T10 full local verification at `70bc688`. Evidence: runner `--execute` exit 0 with a current mirror (T10 PASSED, empty error ledger, em dash and attribution scans included); full suite 581 pass 6 skip 0 fail; restricted PATH 430 pass 157 skip 0 fail; real assets 4 pass; PKGBUILD shellcheck exit 0; `tests/install.Tests.ps1` passed.
 - [x] Deliver: commits by explicit path under the owner identity, no co-author trailer; PR #8 from `--body-file`; registry `open #8`.
 - [x] F01 S2 created startup files (debt sweep, owner-selected). Evidence: RED on a HEAD-only bundle (byte-identical to the committed `install.sh`) exit 1, 5 fail plus 1 for the unreadable-record test (the emptied `--bashrc` and `.zshenv` stayed, HOME not empty, a linked record written into); six mutations each turn only their test red; GREEN 16 Linux suites 245 pass; one existing test (`uninstall of a bashrc holding only the block leaves it empty`) pinned the old behaviour for a created file and now seeds the user's own `.bashrc`; README states the rule, pinned by a test; `build.mjs --check`, `bash -n`, `shellcheck -S warning` exit 0.
-- [ ] Sweep: debt sweep, learning ledger, closeout decision, graph index.
+- [x] Sweep: debt sweep, learning ledger, closeout decision, graph index.
+  - [x] Debt sweep (2026-10-12): one question shared with vivera; owner selected S2 (done as F01) and S1 (vivera V4); S3, S4 deferred with markers. Record: `docs/code-plan/sessions/2026-10-12-snipset-cli-deferred-hardening/debt-sweep.md`; ledger and five `MEMORY.md` rules committed.
+  - [x] Close plan (2026-10-12). Evidence: `SNIPSET_REAL_ASSETS=<assets> bun ~/vivera/scripts/plan-closeout.mjs --readiness <plan>` exit 3, verdict `NEEDS-HUMAN`: 9 DONE (T01 to T08, F01), T09 and T10 UNPROVEN (`skip_if: "false"`; T09 proof is `review.md`, T10 proof is the runner PASSED at `e9e5f13`), open NOW follow-ups 0. The owner answered `Mark Complete`; status set to `Complete` on the session branch before the merge.
+  - [x] Graph index (2026-10-12, worktree, `graphify-out/` gitignored). Evidence: `graphify update .` exit 0 (1287 nodes, 2408 edges); `bun ~/vivera/scripts/graphify-sync.mjs --root "$(pwd)"` exit 0, 35 documents, 1287 to 1600 nodes, ghost source files 0; `--check --root "$(pwd)"` exit 0 after this line was written and synced.
 
 ## 7. Risks and Decisions
 
