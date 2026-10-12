@@ -320,20 +320,73 @@ function Invoke-SnipsetMcpCli {
   [pscustomobject]@{ Code = $code; Out = $stdout; Err = $err }
 }
 
-# Returns nocli, absent, other (file without snipset), mine, or foreign.
+function Get-SnipsetMcpGeminiSettings {
+  [IO.Path]::Combine($HOME, '.gemini', 'settings.json')
+}
+
+# Only a user-scope entry is the installer's: "remove --scope user" never touches
+# another scope, and an entry in another scope can shadow the user one.
+function Get-SnipsetMcpClaudeState {
+  param([string]$Cli, [string]$Bin)
+  $result = Invoke-SnipsetMcpCli -Path $Cli -Arguments @('mcp', 'get', 'snipset')
+  if ($result.Code -ne 0) { return 'absent' }
+  $scope = ''
+  $first = ''
+  $mine = $false
+  $binSeen = $false
+  foreach ($line in $result.Out) {
+    if ($line -match '^\s*scope:\s*(.*?)\s*$') {
+      $scope = switch -Regex ($Matches[1]) {
+        '^user' { 'user' }
+        '^local' { 'local' }
+        '^project' { 'project' }
+        default { ($_ -split '\s+')[0] }
+      }
+      if (-not $first) { $first = $scope }
+    } elseif ($line -match '^\s*command:\s*(.*?)\s*$') {
+      if ($Matches[1] -ceq $Bin) {
+        $binSeen = $true
+        if ($scope -eq 'user') { $mine = $true }
+      }
+      $scope = ''
+    }
+  }
+  if (-not $first) { $first = 'unknown' }
+  if ($mine) { return 'mine user' }
+  if ($binSeen) { return "scoped $first" }
+  "foreign $first"
+}
+
+# The user settings file decides ownership; "gemini mcp list" merges every scope.
+function Get-SnipsetMcpGeminiState {
+  param([string]$Cli, [string]$Bin)
+  $settings = Get-SnipsetMcpGeminiSettings
+  $text = if ([IO.File]::Exists($settings)) { [IO.File]::ReadAllText($settings) } else { '' }
+  if ($text.Contains('"snipset"')) {
+    if ($text.Contains((ConvertTo-Json -InputObject $Bin -Compress))) { return 'mine' }
+    return 'foreign'
+  }
+  $result = Invoke-SnipsetMcpCli -Path $Cli -Arguments @('mcp', 'list')
+  if ($result.Code -eq 0 -and ($result.Out | Where-Object { $_ -match '(^|\s)snipset:' })) { return 'scoped' }
+  'absent'
+}
+
+# Detail for an entry the installer leaves alone because it sits in another scope.
+function Get-SnipsetMcpScopedDetail {
+  param([string]$Id, [string]$Scope)
+  if ($Id -eq 'claude') { return "$Scope entry left untouched" }
+  "snipset is registered outside $(Get-SnipsetMcpGeminiSettings); left untouched"
+}
+
+# Returns nocli, absent, other (file without snipset), mine, foreign, or scoped (the bin
+# is registered in a scope the installer does not own); claude adds a second word naming the scope.
 function Get-SnipsetMcpState {
   param([string]$Id, [string]$Bin)
   $cli = Find-SnipsetMcpCli -Id $Id
   if ($Id -in 'claude', 'codex', 'gemini') {
     if (-not $cli) { return 'nocli' }
-    if ($Id -eq 'gemini') {
-      $result = Invoke-SnipsetMcpCli -Path $cli -Arguments @('mcp', 'list')
-      if ($result.Code -ne 0) { return 'absent' }
-      $line = $result.Out | Where-Object { $_ -match '(^|\s)snipset:' } | Select-Object -First 1
-      if (-not $line) { return 'absent' }
-      if ("$line ".Contains("snipset: $Bin ")) { return 'mine' }
-      return 'foreign'
-    }
+    if ($Id -eq 'claude') { return Get-SnipsetMcpClaudeState -Cli $cli -Bin $Bin }
+    if ($Id -eq 'gemini') { return Get-SnipsetMcpGeminiState -Cli $cli -Bin $Bin }
     $result = Invoke-SnipsetMcpCli -Path $cli -Arguments @('mcp', 'get', 'snipset')
     if ($result.Code -ne 0) { return 'absent' }
     $command = ''
@@ -361,7 +414,7 @@ function Install-SnipsetMcp {
         Write-SnipsetReport -Status SKIP -Item $id -Detail "$cliName not on PATH"
         continue
       }
-      $state = Get-SnipsetMcpState -Id $id -Bin $Bin
+      $state = ("$(Get-SnipsetMcpState -Id $id -Bin $Bin)" -split ' ')[0]
       $file = Get-SnipsetMcpFile -Id $id
       if ($id -in 'opencode', 'cursor') {
         if ($state -eq 'absent') {
@@ -383,7 +436,7 @@ function Install-SnipsetMcp {
         }
         continue
       }
-      if ($state -in 'mine', 'foreign') {
+      if ($state -in 'mine', 'foreign', 'scoped') {
         Write-SnipsetReport -Status KEEP -Item $id -Detail 'snipset is already registered'
         continue
       }
@@ -422,9 +475,11 @@ function Test-SnipsetMcp {
         Write-SnipsetReport -Status SKIP -Item $id -Detail "$cliName not on PATH"
         continue
       }
-      switch (Get-SnipsetMcpState -Id $id -Bin $Bin) {
+      $state, $scope = "$(Get-SnipsetMcpState -Id $id -Bin $Bin)" -split ' ', 2
+      switch ($state) {
         'mine' { Write-SnipsetReport -Status OK -Item $id -Detail "snipset points at $Bin" }
         'foreign' { Write-SnipsetReport -Status KEEP -Item $id -Detail 'snipset points elsewhere' }
+        'scoped' { Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpScopedDetail -Id $id -Scope $scope) }
         default { Write-SnipsetReport -Status MISSING -Item $id -Detail 'snipset is not registered' }
       }
     } catch {
@@ -438,10 +493,12 @@ function Remove-SnipsetMcp {
   if (-not $Ids) { $Ids = @('claude', 'codex', 'gemini', 'opencode', 'cursor', 'vscode') }
   foreach ($id in $Ids) {
     try {
-      $state = Get-SnipsetMcpState -Id $id -Bin $Bin
+      $state, $scope = "$(Get-SnipsetMcpState -Id $id -Bin $Bin)" -split ' ', 2
       $file = Get-SnipsetMcpFile -Id $id
       if ($state -eq 'nocli') {
         Write-SnipsetReport -Status SKIP -Item $id -Detail "$(Get-SnipsetMcpCliName -Id $id) not on PATH"
+      } elseif ($state -eq 'scoped' -or ($id -eq 'claude' -and $state -eq 'foreign')) {
+        Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpScopedDetail -Id $id -Scope $scope)
       } elseif ($state -eq 'foreign') {
         Write-SnipsetReport -Status KEEP -Item $id -Detail 'snipset points elsewhere'
       } elseif ($state -ne 'mine') {

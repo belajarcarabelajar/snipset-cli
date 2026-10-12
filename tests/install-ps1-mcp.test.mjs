@@ -61,7 +61,10 @@ const STUBS = {
       `printf 'snipset\\n  enabled: true\\n  transport: stdio\\n  command: %s\\n  args: %s\\n' "$cmd" "$args"`,
       opts,
     ),
+  // "$HOME/.stub-gemini" is the merged view "mcp list" prints (any scope); add and
+  // "remove --scope user" also write the user settings file, like the real CLI.
   gemini: () => `${LOG_ARGV("gemini")}reg="$HOME/.stub-gemini"
+settings="$HOME/.gemini/settings.json"
 [ "$1" = mcp ] || exit 2
 case "$2" in
   list)
@@ -71,10 +74,13 @@ case "$2" in
     shift 2
     while [ "$1" = --scope ]; do shift 2; done
     shift; cmd="$1"; shift
-    printf '%s\\n%s\\n' "$cmd" "$*" > "$reg" ;;
+    printf '%s\\n%s\\n' "$cmd" "$*" > "$reg"
+    a=""; for x in "$@"; do a="$a\${a:+, }\\"$x\\""; done
+    mkdir -p "$HOME/.gemini"
+    printf '{\\n  "mcpServers": {\\n    "snipset": {\\n      "command": "%s",\\n      "args": [%s]\\n    }\\n  }\\n}\\n' "$cmd" "$a" > "$settings" ;;
   remove)
-    if [ ! -f "$reg" ]; then echo "not found" >&2; exit 1; fi
-    mv "$reg" "$reg.removed" ;;
+    if [ ! -f "$settings" ]; then echo "not found" >&2; exit 1; fi
+    mv "$settings" "$settings.removed" ;;
   *) exit 2 ;;
 esac
 `,
@@ -151,6 +157,41 @@ function writeFile(path, content) {
 const opencodeJson = (command) =>
   `${JSON.stringify({ $schema: "https://opencode.ai/config.json", mcp: { snipset: { type: "local", command, enabled: true } } })}\n`;
 const cursorJson = (bin, args) => `${JSON.stringify({ mcpServers: { snipset: { type: "stdio", command: bin, args } } })}\n`;
+
+const SCOPES = {
+  user: ["User config (available in all your projects)", "user"],
+  local: ["Local config (private to you in this project)", "local"],
+  project: ["Project config (shared via .mcp.json)", "project"],
+};
+
+// The observed "claude mcp get" output shape. The real CLI prints only the
+// highest-precedence scope (local over user); this stub may print several blocks.
+function claudeGetStub(blocks) {
+  const text = blocks
+    .map(
+      ([scope, command]) =>
+        `snipset:\n  Scope: ${SCOPES[scope][0]}\n  Status: ✘ Failed to connect\n  Type: stdio\n  Command: ${command}\n  Args: mcp\n  Environment:\n\nTo remove this server, run: claude mcp remove snipset -s ${SCOPES[scope][1]}\n`,
+    )
+    .join("\n");
+  return `${LOG_ARGV("claude")}[ "$1" = mcp ] || exit 2
+case "$2" in
+  get) cat <<'EOF'
+${text}EOF
+    ;;
+  remove) : ;;
+  *) exit 2 ;;
+esac
+`;
+}
+
+function geminiSettings(sb, command) {
+  writeFile(
+    join(sb.home, ".gemini", "settings.json"),
+    `${JSON.stringify({ mcpServers: { snipset: { command, args: ["mcp"] } } }, null, 2)}\n`,
+  );
+}
+
+const removes = (sb) => calls(sb).filter((argv) => argv[2] === "remove");
 
 test("mcp.ps1 parses and uses neither the script scope nor exit", OPTS, async () => {
   const sb = makeSandbox();
@@ -342,4 +383,79 @@ test("Remove-SnipsetMcp keeps an opencode or cursor file that differs from what 
     `[KEEP] opencode: ${paths.opencode} differs from what the installer writes; remove snipset by hand`,
     `[KEEP] cursor: ${paths.cursor} differs from what the installer writes; remove snipset by hand`,
   ]);
+});
+
+test("claude: a local-scope entry for the bin and a user-scope entry elsewhere are both kept", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: [] });
+  stubCommand(sb, "claude", claudeGetStub([["local", bin], ["user", "/elsewhere/snipset"]]));
+  const r = await remove(sb, { ids: ["claude"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), ["[KEEP] claude: local entry left untouched"]);
+});
+
+test("claude: a local-scope entry for the bin is not OK in Test-SnipsetMcp and is kept by Remove-SnipsetMcp", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: [] });
+  stubCommand(sb, "claude", claudeGetStub([["local", bin]]));
+  const c = await check(sb, { ids: ["claude"], bin });
+  assert.deepEqual(results(c.stdout), ["[KEEP] claude: local entry left untouched"]);
+  const r = await remove(sb, { ids: ["claude"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), ["[KEEP] claude: local entry left untouched"]);
+});
+
+test("claude: a user-scope entry for another binary is kept by Remove-SnipsetMcp", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: [] });
+  stubCommand(sb, "claude", claudeGetStub([["user", "/elsewhere/snipset"]]));
+  const r = await remove(sb, { ids: ["claude"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), ["[KEEP] claude: user entry left untouched"]);
+});
+
+test("claude: a user-scope entry for the bin is OK and is removed with --scope user", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: [] });
+  stubCommand(sb, "claude", claudeGetStub([["user", bin]]));
+  const c = await check(sb, { ids: ["claude"], bin });
+  assert.deepEqual(results(c.stdout), [`[OK] claude: snipset points at ${bin}`]);
+  const r = await remove(sb, { ids: ["claude"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), [["claude", "mcp", "remove", "--scope", "user", "snipset"]]);
+  assert.deepEqual(results(r.stdout), ["[REMOVED] claude: snipset"]);
+});
+
+test("gemini: Remove-SnipsetMcp keeps an entry when the user settings file points elsewhere", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: ["gemini"] });
+  seed(sb, "gemini", bin);
+  geminiSettings(sb, "/elsewhere/snipset");
+  const r = await remove(sb, { ids: ["gemini"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), ["[KEEP] gemini: snipset points elsewhere"]);
+  assert.ok(existsSync(join(sb.home, ".gemini", "settings.json")));
+});
+
+test("gemini: an entry that is not in the user settings file is kept by Test-SnipsetMcp and Remove-SnipsetMcp", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: ["gemini"] });
+  seed(sb, "gemini", bin);
+  const settings = join(sb.home, ".gemini", "settings.json");
+  const c = await check(sb, { ids: ["gemini"], bin });
+  assert.deepEqual(results(c.stdout), [`[KEEP] gemini: snipset is registered outside ${settings}; left untouched`]);
+  const r = await remove(sb, { ids: ["gemini"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), [`[KEEP] gemini: snipset is registered outside ${settings}; left untouched`]);
+});
+
+test("gemini: the user settings entry for the bin is OK and removed even when the list shows another scope", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: ["gemini"] });
+  seed(sb, "gemini", "/elsewhere/snipset");
+  geminiSettings(sb, bin);
+  const c = await check(sb, { ids: ["gemini"], bin });
+  assert.deepEqual(results(c.stdout), [`[OK] gemini: snipset points at ${bin}`]);
+  const r = await remove(sb, { ids: ["gemini"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), [["gemini", "mcp", "remove", "--scope", "user", "snipset"]]);
+  assert.deepEqual(results(r.stdout), ["[REMOVED] gemini: snipset"]);
 });
