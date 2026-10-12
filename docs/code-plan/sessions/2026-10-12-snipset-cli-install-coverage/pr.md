@@ -15,6 +15,8 @@ Both installers gain a full lifecycle and safer defaults, and the repository gai
 
 **Non-goals:** CI workflow changes (labels only); macOS or ARM builds; publishing the release or submitting to winget, the AUR, or a tap; code signing; a Docker image (the EULA forbids redistribution).
 
+**Debt-sweep follow-ups (selected by the owner, plan tasks F01 to F05):** `install.sh` also refuses archive members named `..`, ending in `/..`, or starting `./-`, and hard-link members (`cbafc75`); a reinstall over an existing database no longer relays the CLI's `already exists ... pass --force` text, while other `init` failures stay visible (`e36fe8a`); `install.ps1` accepts the `*` binary-mode marker in `SHA256SUMS` (`84620f2`); the MCP stubs shared by the Linux and Windows suites moved to `tests/helpers/mcp-stubs.mjs` (`f7978a6`); a test pins that uninstall keeps a symlink at a listed shim name (`d0903a8`).
+
 ## 3. Acceptance Criteria
 
 | ID | Criterion | Check | Evidence |
@@ -79,10 +81,9 @@ The six skips: four real-asset tests (opt-in), `nix flake check` (needs nix and 
 - Empty directories the install created can remain after uninstall (documented). `defer: remove them when empty, a user report`.
 - Windows itself, Windows PowerShell 5.1, Scoop, winget, Homebrew, Nix, mise, eget, ubi, and non-Arch distros were not run (no host or tool). `defer: labelled not verified, a run on that host`.
 - The output formats of `codex`, `gemini`, and VS Code were read from vendor docs and source, not observed; Gemini `--db` forwarding without `--` is unverified. `defer: CLIs absent, a host with those CLIs`.
-- `install.ps1` does not accept the `*` marker in `SHA256SUMS` (the release does not use it) and has no `-Db`. `defer: parity gap, a release that writes the marker or a Windows database init step`.
-- The archive entry check does not refuse a member named exactly `..` or hard-link members. `defer: GNU tar refuses escapes on extract, a hostile archive reaching a user`.
-- The MCP stdin redirect has no test (the helper always gives stdin `ignore`); the 14 legacy Linux tests pass the full `process.env`; `tests/install-ps1-mcp.test.mjs` (503 lines) duplicates stubs from the Linux suite. `defer: test-only debt, the next change to those suites`.
-- The ps1 suites assert pwsh 7.6 output and `ruby -c` has never run; both run on the CI runner for the first time. `defer: CI is the author's evidence here, the first CI run on this PR`.
+- `install.ps1` has no `-Db`. `defer: Windows has no database init step, install.ps1 gains snipset init`.
+- The MCP stdin redirect has no test (the helper always gives stdin `ignore`); the 14 legacy Linux tests pass the full `process.env`. `defer: test-only debt, the next change to those suites`.
+- `ruby -c` on the Homebrew formula has never run on this machine (ruby absent). The CI runs on this PR were green, which is the author's evidence, not verification. `defer: ruby absent, a host with ruby`.
 - In the private Snipset repository (not changed here): `scripts/distribution/aur/PKGBUILD` declares `MIT` with empty checksums, `distribution/snipset-cli/` is a stale copy of these installers, `stage-public-cli.mjs` allows only six files, and `package-cli.mjs` could also emit per-asset `.sha256` files for eget. `defer: other repository, the next distribution session there`.
 
 ## 8. Checklist
