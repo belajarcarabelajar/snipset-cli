@@ -40,10 +40,19 @@ shell_manifest_write() {
   report FAIL 'shell manifest' "${manifest} could not be written"
 }
 shell_bundle_place() {
-  local name path want lines=""
+  local name path want lines="" adopt=0
   shell_kept=()
   if ((do_shell)) && ((has_shell)); then
     mkdir_recorded "$share_dir"
+    # An older installer left its files in the default share dir with no manifest. That installer
+    # made the directory, so it joins the record and uninstall removes it once empty, as before.
+    if [[ "$share_dir" == "${HOME}/.local/share/snipset" && ! -e "${share_dir}/.snipset-bundle" && ! -L "${share_dir}/.snipset-bundle" ]]; then
+      for name in snipset.sh completion.bash tab.sh; do
+        if [[ -f "${share_dir}/${name}" && ! -L "${share_dir}/${name}" ]]; then
+          adopt=1
+        fi
+      done
+    fi
     for name in snipset.sh completion.bash tab.sh; do
       path="${share_dir}/${name}"
       if [[ -e "$path" || -L "$path" ]]; then
@@ -68,6 +77,7 @@ shell_bundle_place() {
       lines+="$(sha256_of "$path")  ${name}"$'\n'
     done
     shell_manifest_write "$lines"
+    ((adopt == 0)) || dirs_record_add "$share_dir"
   elif ((do_shell)); then
     note 'release predates the shell bundle; skipping shell integration'
   fi

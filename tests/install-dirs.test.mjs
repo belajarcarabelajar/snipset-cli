@@ -162,6 +162,26 @@ test("dirs record: an older install without a record still has its emptied share
   assert.ok(!existsSync(sb.at(".local", "share", "snipset")), `the emptied share dir stayed:\n${un.stdout}`);
 });
 
+test("dirs record: a reinstall over an older install adopts the default share dir it took over", async () => {
+  const sb = sandbox();
+  await ok(sb, FLAGS);
+  // An older installer left its files in the default share dir with neither the record nor the manifest.
+  await rm(sb.record);
+  await rm(sb.at(".local", "share", "snipset", ".snipset-bundle"));
+  await ok(sb, FLAGS);
+  assert.ok(recordLines(sb).includes(sb.at(".local", "share", "snipset")), recordLines(sb).join("\n"));
+  const un = await ok(sb, ["--uninstall", ...FLAGS]);
+  assert.ok(!existsSync(sb.at(".local", "share", "snipset")), `the adopted share dir stayed:\n${un.stdout}`);
+});
+
+test("dirs record: a share dir holding only a user's own file is not adopted", async () => {
+  const sb = sandbox();
+  mkdirSync(sb.at(".local", "share", "snipset"), { recursive: true });
+  writeFileSync(sb.at(".local", "share", "snipset", "notes.txt"), "mine\n");
+  await ok(sb, FLAGS);
+  assert.ok(!recordLines(sb).includes(sb.at(".local", "share", "snipset")), recordLines(sb).join("\n"));
+});
+
 test("dirs record: ZDOTDIR and a custom --bashrc parent are recorded and removed once empty", async () => {
   const sb = sandbox();
   const env = { SHELL: "/usr/bin/zsh", ZDOTDIR: sb.at("zdot") };
