@@ -230,7 +230,7 @@ tasks:
   - id: T12
     depends_on: [T05, T06, T07, T08, T09, T10, T11]
     impacts: ["every Linux installer suite - bun test tests/install.test.mjs tests/install-cli.test.mjs tests/install-platform.test.mjs tests/install-fetch.test.mjs tests/install-binary.test.mjs tests/install-shell.test.mjs tests/install-shims.test.mjs tests/install-pathenv.test.mjs tests/install-mcp.test.mjs", "README lifecycle section - rg -n -- '--check|--uninstall|--update|--dry-run' README.md"]
-    files: { create: [tests/install-lifecycle.test.mjs], modify: [scripts/installer/sh/modes.sh], test: [tests/install.test.mjs] }
+    files: { create: [tests/install-lifecycle.test.mjs], modify: [scripts/installer/sh/modes.sh, scripts/installer/sh/lib.sh, scripts/installer/sh/args.sh], test: [tests/install.test.mjs] }
     idempotency_key: "T12:sh-lifecycle-modes"
     skip_if: "timeout 120 bun test --timeout 30000 tests/install-lifecycle.test.mjs"
     verify_exit: 0
@@ -620,13 +620,13 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] T02 sh bundle and split. Evidence: chef RED exit 1 (11 fail), GREEN 26 pass; parent rerun of sandbox, build, install, winget suites exit 0 (70 pass); `build.mjs --check --target sh`, `shellcheck -S warning install.sh` exit 0; `git diff HEAD -- install.sh` shows only the notice, `note()` moved up, and the tool checks plus `target=` moved after path validation; parent fixed `installerPath` to fall back when a target has no `ORDER` (kept the ps1 sandbox test green between T02 and T03); commit `cc7b3f0`.
   - [x] T03 ps1 bundle and split. Evidence: chef RED `--check --target ps1` exit 1 and 4 new tests failing; parent rerun of build, ps1, sandbox suites exit 0 (47 pass) after fixing the sh drift test that C04's move of the `Installed` line had made a no-op; `install.Tests.ps1` passes; `build.mjs --check` (all) exit 0; commit `ad65778`. Findings: `$script:` resolves to the caller's session in the scriptblock one-liner (measured), so no part uses it and C13 was amended; today's `-AddPath` joins two strings when the User Path holds one entry (`C:\aC:\b`), added to C15 as a regression case.
   - [x] T04 sh CLI contract. Evidence: nappy RED 9 fail, GREEN 24 pass (14 existing plus 10); parent regenerated `install.sh` and reran cli, install, sandbox suites exit 0 (52 pass); `shellcheck -S warning` on the bundle and all parts exit 0; `modes.sh` read in full; commit `3d7ad73`.
-  - [ ] T05 platform guards
-  - [ ] T06 fetch fallbacks and offline
-  - [ ] T07 smoke before replace
-  - [ ] T08 shell block and db
-  - [ ] T09 shims lifecycle
-  - [ ] T10 zsh and fish PATH
-  - [ ] T11 MCP six harnesses
+  - [x] T05 platform guards. Evidence: chef RED 8 fail, GREEN 11 pass; parent private bundle (HEAD parts plus `platform.sh`) 35 pass across platform, install, cli; bundle shellcheck exit 0; commit `dd4b094`.
+  - [x] T06 fetch fallbacks and offline. Evidence: nappy RED 12 fail, GREEN 12 pass; parent bundle 47 pass across four suites; commit `b4dd3b5`. Dry-run wording follow-up moved into C12.
+  - [x] T07 smoke before replace. Evidence: hoggy RED 17 fail, GREEN 17 pass (loader error and `ldd not found` lines printed, old binary byte-identical, stage gone); parent bundle 77 pass across six suites; commit `d9c514b`.
+  - [x] T08 shell block and db. Evidence: chef RED 11 fail, GREEN 13 pass (symlinked bashrc stays a symlink; a newline mutation turned its test red); parent bundle 60 pass across five suites; commit `4869172`. Finding: `--uninstall --dry-run` deletes for real; C12 and C15 now refuse that combination.
+  - [x] T09 shims lifecycle. Evidence: nappy RED 9 fail, GREEN 9 pass (names with `/`, `.`, `..` and symlinks are kept); parent bundle 69 pass across six suites; commit `b62d734`.
+  - [x] T10 zsh and fish PATH. Evidence: hoggy RED 13 fail, GREEN 14 pass; parent bundle 100 pass across eight suites; commit `b0859db`. Deviation accepted: the line also goes into a `--bashrc` file the shell block is about to create, so a second run adds nothing.
+  - [x] T11 MCP six harnesses. Evidence: chef RED 11 fail, GREEN 11 pass; `claude mcp add/get/remove --help` read with a throwaway HOME and a read-only `claude mcp get` probe; parent bundle 111 pass across nine suites; `build.mjs --check --target sh` exit 0 afterwards; commit `ff07a9b`. Unverified: codex, gemini, VS Code output formats (CLIs absent) and gemini `--db` forwarding without `--`.
   - [ ] T12 sh lifecycle modes
   - [ ] T13 ps1 CLI contract
   - [ ] T14 ps1 platform, offline, smoke
