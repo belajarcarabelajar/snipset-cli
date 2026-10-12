@@ -1,0 +1,19 @@
+pkgbase = snipset-cli
+	pkgdesc = Command-line and MCP server interface for Snipset snippets
+	pkgver = 0.2.0
+	pkgrel = 1
+	url = https://snipset.belajarcarabelajar.com
+	arch = x86_64
+	license = LicenseRef-Snipset-EULA
+	depends = glibc
+	depends = gcc-libs
+	depends = openssl
+	depends = zlib
+	depends = brotli
+	depends = zstd
+	options = !strip
+	options = !debug
+	source_x86_64 = snipset-cli-0.2.0-x86_64.tar.gz::https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.2.0/snipset-cli-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums_x86_64 = 57b43b6ee0b55fc690cac8851d2c5009eefdc10e538fb5683bc294cf8c78cfe5
+
+pkgname = snipset-cli
