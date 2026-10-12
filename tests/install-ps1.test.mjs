@@ -14,6 +14,7 @@ const pwshSkip = Bun.which("pwsh") ? false : "pwsh not on PATH";
 // bun test prints a skipped test's name but not its reason, so say it once here.
 if (pwshSkip) console.warn(`skipping install.ps1 Linux run: ${pwshSkip}`);
 
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const installScript = fileURLToPath(new URL("../install.ps1", import.meta.url));
 const version = "v0.1.0";
 const archiveName = `snipset-cli-${version}-x86_64-pc-windows-msvc.zip`;
@@ -101,4 +102,13 @@ test("install.ps1 rejects an archive whose checksum does not match SHA256SUMS", 
     assert.deepEqual(await entriesWithPrefix(tmp, "snipset-install-"), [], "expected no snipset-install-* left in TMPDIR");
     assert.deepEqual(await entriesWithPrefix(bin, "snipset.exe"), [], "expected nothing installed after a checksum mismatch");
   });
+});
+
+test("install.Tests.ps1 contract checks pass against install.ps1", { skip: pwshSkip, timeout: 60000 }, async () => {
+  const { stdout } = await run("pwsh", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-File", "tests/install.Tests.ps1",
+  ], { cwd: repoRoot, env: pwshEnv });
+  assert.match(stdout, /^PowerShell installer contract passed$/m);
 });
