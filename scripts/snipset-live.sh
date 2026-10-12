@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # snipset-live: run snipset CLI against a snapshot of the live Desktop database.
-# Reads hit the snapshot (no lock contention, no repeated 200MB copies).
+# Reads hit the snapshot (no lock contention; recopied only if missing, forced, or older than the live db or its -wal).
 # Writes go to the live database, but only after `snipset doctor` proves it
 # is reachable; otherwise the write is refused so a locked live file is
 # never touched from behind the running app.
