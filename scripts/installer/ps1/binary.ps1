@@ -60,6 +60,12 @@ function Install-SnipsetBinary {
     Write-SnipsetReport -Status SKIP -Item 'smoke' -Detail 'not a Windows host'
   }
   $exe = Join-Path $InstallDir 'snipset.exe'
+  # Uninstall later deletes what it finds here, so never put our exe over someone else's file or a link.
+  # Off Windows the existing exe cannot be run, so only a link is refused there.
+  $existing = Get-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue
+  if ($existing -and ($existing.LinkType -or ($windows -and -not (Test-SnipsetBinary -Path $exe)))) {
+    throw "install.ps1: $exe exists and is not a snipset install; move it aside or pass -InstallDir"
+  }
   if ($windows) {
     $moved = Move-SnipsetExe -Candidate $candidate -Exe $exe
     if ($moved -eq 'in-use') {
