@@ -1,6 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -229,4 +229,15 @@ test("dirs record: a directory whose path holds a newline is created but not rec
   const lines = recordLines(sb);
   assert.ok(lines.includes(sb.at(".local", "bin")), lines.join("\n"));
   assert.ok(!lines.some((line) => line === sb.at("x") || line.startsWith("y")), lines.join("\n"));
+});
+
+test("dirs record: a .snipset-dirs linked to a directory is replaced, not written into", async () => {
+  const sb = sandbox();
+  const userDir = sb.at("userdir");
+  mkdirSync(userDir);
+  mkdirSync(sb.at(".local", "bin"), { recursive: true });
+  symlinkSync(userDir, sb.record);
+  await ok(sb, FLAGS);
+  assert.deepEqual(readdirSync(userDir), [], "the record went into the linked directory");
+  assert.ok(lstatSync(sb.record).isFile(), "the record is not a regular file");
 });

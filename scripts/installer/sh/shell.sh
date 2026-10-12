@@ -30,10 +30,11 @@ shell_ownership() {
     shell_why=changed
   fi
 }
-# Replaces the manifest instead of writing through it, so a symlink there is not followed.
+# Replaces the manifest instead of writing through it: with -T a symlink there (even one to a
+# directory) is replaced, and a real directory makes mv fail instead of receiving the file.
 shell_manifest_write() {
   local manifest="${share_dir}/.snipset-bundle" new
-  if new="$(mktemp "${manifest}.XXXXXX" 2>/dev/null)" && printf '%s' "$1" > "$new" && mv -f -- "$new" "$manifest"; then
+  if new="$(mktemp "${manifest}.XXXXXX" 2>/dev/null)" && printf '%s' "$1" > "$new" && mv -fT -- "$new" "$manifest"; then
     return 0
   fi
   [[ -z "${new:-}" ]] || rm -f -- "$new"
