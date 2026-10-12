@@ -497,7 +497,7 @@ tasks:
 - Install state is derived from disk, never recorded: shims by their generator header plus `<dir>/.snipset-shims`, the bashrc block by its marker, PATH lines by exact text, env files by exact content, MCP entries by a command equal to the installed binary path.
 - Package manifests are rendered from `packaging/VERSION` and `packaging/SHA256SUMS` by `scripts/packaging/render.mjs`, which discovers one template directory per channel under `packaging/templates/<channel>/` (a `target.json` plus templates) and fails `--check` on drift or orphaned output.
 
-**Tech Stack:** bash (bundle runs on bash 4+; parts are `# shellcheck shell=bash` fragments), PowerShell 7.6.6 here (target: Windows PowerShell 5.1 and PowerShell 7), Bun 1.4.3 (`bun:test`), ShellCheck, makepkg 7 with fakeroot (Arch, present).
+**Tech Stack:** bash (bundle needs bash 4.4+, checked at start since review wave 1 B5; parts are `# shellcheck shell=bash` fragments), PowerShell 7.6.6 here (target: Windows PowerShell 5.1 and PowerShell 7), Bun 1.4.3 (`bun:test`), ShellCheck, makepkg 7 with fakeroot (Arch, present).
 
 **Active Project Profile:** repo `/home/belajarcarabelajar/Proyek/snipset-cli` (public, EULA, no tags, one Draft release `v0.2.0`), session worktree `/home/belajarcarabelajar/Proyek/snipset-cli-wt/install-coverage`, branch `2026-10-12-snipset-cli-install-coverage/install-coverage`, base `main` at `8db8138`. No `user.name`/`user.email` in this repo's git config: commits use `-c user.name='Iwan Kurniawan' -c user.email='110369962+belajarcarabelajar@users.noreply.github.com'`, the identity of every earlier commit. Machine: Arch Linux x86_64, glibc above 2.34, bun 1.4.3, pwsh 7.6.6 at `~/.local/bin/pwsh`, shellcheck, makepkg, fakeroot, jq, gh; absent: docker, podman, brew, ruby, scoop, winget, nix, mise, eget, ubi, namcap.
 
@@ -644,6 +644,7 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] Review wave 1 (after W4): independent read-only review of the Linux parts; every P0/P1 fixed or recorded. Findings in `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/review-wave-1.md`.
   - [ ] C11b MCP scope-safe removal (fixes A3, A4, A6)
   - [ ] C12b safe startup-file rewrites and keeps (fixes A1, A7 to A10)
+  - [ ] C06b archive and fetch hardening (fixes B1 to B7, B9)
   - [ ] Review wave 2 (after W6): independent read-only review of the Windows parts and the manifests.
   - [ ] Review wave 3 (before the PR): README claim check, lifecycle state machine, PR hygiene.
 - [ ] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0.
