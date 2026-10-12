@@ -7,7 +7,7 @@ import { dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { installerPath } from "./helpers/install-sandbox.mjs";
+import { DEFAULT_TOOLS, installerPath, linkTools } from "./helpers/install-sandbox.mjs";
 
 const run = promisify(execFile);
 const script = installerPath("sh");
@@ -127,12 +127,7 @@ test("installs a pinned release and preserves an existing binary on rerun", asyn
   const home = await mkdtemp(join(tmpdir(), "snipset-home-"));
   const installDir = join(home, "bin");
   try {
-    const env = {
-      ...process.env,
-      HOME: home,
-      PATH: `${fixture.binDir}:${process.env.PATH}`,
-      SNIPSET_RELEASE_BASE_URL: "https://fixture.invalid",
-    };
+    const env = await freshEnv(fixture, home);
     await run("bash", [script, "--version", "0.1.0", "--install-dir", installDir], { env });
     const version = await run(join(installDir, "snipset"), ["--version"], {
       env: { ...env, HOME: home },
@@ -153,12 +148,7 @@ test("rejects a checksum mismatch before replacing the installed binary", async 
   const existing = join(installDir, "snipset");
   await writeFile(existing, "existing");
   try {
-    const env = {
-      ...process.env,
-      HOME: home,
-      PATH: `${fixture.binDir}:${process.env.PATH}`,
-      SNIPSET_RELEASE_BASE_URL: "https://fixture.invalid",
-    };
+    const env = await freshEnv(fixture, home);
     await assert.rejects(
       run("bash", [script, "--version", "0.1.0", "--install-dir", installDir], { env })
     );
@@ -169,14 +159,33 @@ test("rejects a checksum mismatch before replacing the installed binary", async 
   }
 });
 
+// Call after the curl stub is written: linkTools keeps an existing name, but a stub written
+// afterwards would go through the tool symlink into the real binary. getconf, ldd, and timeout
+// keep these tests on the normal glibc check and the bounded smoke run.
 async function freshEnv(fixture, home) {
+  linkTools(fixture.binDir, [...DEFAULT_TOOLS, "getconf", "ldd", "timeout"]);
   return {
-    ...process.env,
     HOME: home,
-    PATH: `${fixture.binDir}:${process.env.PATH}`,
+    PATH: fixture.binDir,
+    LANG: "C",
     SNIPSET_RELEASE_BASE_URL: "https://fixture.invalid",
   };
 }
+
+test("legacy env is scrubbed: no caller PATH entry reaches the installer", async () => {
+  const fixture = await fakeRelease();
+  const home = await mkdtemp(join(tmpdir(), "snipset-home-"));
+  try {
+    const env = await freshEnv(fixture, home);
+    const callerPath = new Set((process.env.PATH ?? "").split(":").filter(Boolean));
+    assert.deepEqual(env.PATH.split(":").filter((entry) => callerPath.has(entry)), []);
+    const own = new Set(["HOME", "PATH", "LANG", "SNIPSET_RELEASE_BASE_URL"]);
+    assert.deepEqual(Object.keys(env).filter((key) => !own.has(key) && key in process.env), []);
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
 
 test("full setup installs binary, database, shell, and shims", async () => {
   const fixture = await fakeRelease();
@@ -401,8 +410,18 @@ test("curl calls carry retry and stall limits", async () => {
 });
 
 test("--help and -h print usage and exit 0", async () => {
-  for (const flag of ["--help", "-h"]) {
-    const result = await run("bash", [script, flag]);
-    assert.match(result.stdout, /Usage: install\.sh/);
+  const root = await mkdtemp(join(tmpdir(), "snipset-help-"));
+  const home = join(root, "home");
+  const binDir = join(root, "bin");
+  try {
+    await mkdir(home);
+    await mkdir(binDir);
+    const env = await freshEnv({ binDir }, home);
+    for (const flag of ["--help", "-h"]) {
+      const result = await run("bash", [script, flag], { env });
+      assert.match(result.stdout, /Usage: install\.sh/);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

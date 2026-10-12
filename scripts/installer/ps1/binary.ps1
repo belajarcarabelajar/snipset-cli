@@ -11,12 +11,36 @@ function Test-SnipsetArchive {
     $zipArchive.Dispose()
   }
 }
-function Test-SnipsetBinary {
-  param([string]$Path)
+function Invoke-SnipsetVersionProbe {
+  param([string]$Exe)
   # Windows PowerShell 5.1 turns native stderr into a terminating error under 'Stop'; this scope only.
   $ErrorActionPreference = 'Continue'
-  try { $out = @(& $Path --version 2>$null) } catch { return $false }
-  ($LASTEXITCODE -eq 0) -and (($out -join "`n").StartsWith('snipset '))
+  try { $out = @(& $Exe --version 2>$null) } catch { return @{ ExitCode = $null; Output = '' } }
+  @{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n") }
+}
+function Test-SnipsetBinary {
+  param([string]$Path)
+  $probe = Invoke-SnipsetVersionProbe -Exe $Path
+  # The caller's $run keeps the probe, so Install-SnipsetBinary reads the exit code without starting a failing exe twice.
+  if ($run -is [hashtable]) { $run.probe = $probe }
+  ($probe.ExitCode -eq 0) -and "$($probe.Output)".StartsWith('snipset ')
+}
+function Clear-SnipsetOldExe {
+  param([string]$InstallDir, [string]$Status = 'NOTE')
+  if (-not (Test-Path -LiteralPath $InstallDir -PathType Container)) { return }
+  # A regex and not -Filter, whose wildcard also matches 8.3 short names; [0-9] and \z keep out other digits and a trailing newline.
+  $pattern = '^snipset\.exe\.old-[0-9]+(-[0-9a-f]{8})?\z'
+  foreach ($item in @(Get-ChildItem -LiteralPath $InstallDir -Force)) {
+    if ($item.Name -cnotmatch $pattern -or $item.PSIsContainer -or $item.LinkType) { continue }
+    try {
+      Remove-Item -LiteralPath $item.FullName -Force
+    } catch [IO.IOException], [UnauthorizedAccessException] {
+      Write-SnipsetReport -Status NOTE -Item 'binary' -Detail "$($item.FullName) is still in use; it is deleted on the next install or uninstall after that program exits"
+      continue
+    }
+    $detail = if ($Status -eq 'REMOVED') { $item.FullName } else { "deleted $($item.FullName), left by an earlier update" }
+    Write-SnipsetReport -Status $Status -Item 'binary' -Detail $detail
+  }
 }
 function Get-SnipsetInstalledVersion {
   param([string]$InstallDir)
@@ -36,7 +60,8 @@ function Move-SnipsetExe {
     Move-Item -LiteralPath $Candidate -Destination $Exe -Force
     return 'moved'
   } catch [IO.IOException], [UnauthorizedAccessException] { }
-  $aside = "$Exe.old-$PID"
+  # $PID alone repeats for two updates in one session, and the first aside may still be running.
+  $aside = "$Exe.old-$PID-" + [guid]::NewGuid().ToString('N').Substring(0, 8)
   try { Move-Item -LiteralPath $Exe -Destination $aside -Force } catch [IO.IOException], [UnauthorizedAccessException] { return 'in-use' }
   try {
     Move-Item -LiteralPath $Candidate -Destination $Exe -Force
@@ -55,7 +80,14 @@ function Install-SnipsetBinary {
   if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'install.ps1: archive has no snipset.exe' }
   $windows = Test-SnipsetWindowsHost
   if ($windows) {
-    if (-not (Test-SnipsetBinary -Path $candidate)) { throw 'install.ps1: the downloaded snipset.exe failed "snipset.exe --version"; the installed snipset.exe was not changed' }
+    if ($run -is [hashtable]) { $run.probe = $null }
+    if (-not (Test-SnipsetBinary -Path $candidate)) {
+      # 0xC0000135, STATUS_DLL_NOT_FOUND: the loader stopped before snipset.exe ran.
+      if (($run -is [hashtable]) -and $run.probe -and ($run.probe.ExitCode -eq -1073741515)) {
+        throw 'install.ps1: snipset.exe could not start: it needs libcrypto-3-x64.dll and VCRUNTIME140.dll, which this release does not ship; see the README Windows notes'
+      }
+      throw 'install.ps1: the downloaded snipset.exe failed "snipset.exe --version"; the installed snipset.exe was not changed'
+    }
   } else {
     Write-SnipsetReport -Status SKIP -Item 'smoke' -Detail 'not a Windows host'
   }
@@ -67,6 +99,7 @@ function Install-SnipsetBinary {
     throw "install.ps1: $exe exists and is not a snipset install; move it aside or pass -InstallDir"
   }
   if ($windows) {
+    Clear-SnipsetOldExe -InstallDir $InstallDir
     $moved = Move-SnipsetExe -Candidate $candidate -Exe $exe
     if ($moved -eq 'in-use') {
       Write-SnipsetReport -Status FAIL -Item 'binary' -Detail 'in use (close the program using it)'

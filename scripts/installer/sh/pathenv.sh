@@ -47,8 +47,8 @@ pathenv_same() {
 pathenv_line_add() {
   local line
   line="$(pathenv_source_line)"
-  mkdir -p "${1%/*}"
-  touch "$1"
+  mkdir_recorded "${1%/*}"
+  touch_recorded "$1"
   grep -Fqx -- "$line" "$1" || printf '\n%s\n' "$line" >> "$1"
 }
 # Drops each exact line and the blank line written just before it, rewriting in place to keep symlinks.
@@ -74,7 +74,7 @@ pathenv_marked() {
 pathenv_put() {
   local label="$1" file="$2" fn="$3" hint="$4"
   if [[ ! -e "$file" && ! -L "$file" ]]; then
-    if mkdir -p "${file%/*}" 2>/dev/null && "$fn" 2>/dev/null > "$file"; then
+    if mkdir_recorded "${file%/*}" 2>/dev/null && "$fn" 2>/dev/null > "$file"; then
       return 0
     fi
     report FAIL "$label" "$file could not be written"
@@ -161,6 +161,7 @@ pathenv_remove_managed() {
   elif ! pathenv_same "$2" "$3"; then
     report KEEP "$1" "$2 edited; remove it by hand"
   elif rm -f -- "$2" 2>/dev/null && [[ ! -e "$2" ]]; then
+    [[ "${2%/*}" != "$share_dir" ]] || share_removed=1
     report REMOVED "$1" "$2"
   else
     report FAIL "$1" "$2 could not be removed"
@@ -207,5 +208,5 @@ pathenv_remove() {
     pathenv_remove_managed 'path env.fish' "${share_dir}/env.fish" "$(pathenv_fish_env_text; printf x)" && found=1
   fi
   ((found)) || report SKIP path 'nothing to remove'
-  rmdir "$share_dir" 2>/dev/null || true
+  share_dir_fallback_rmdir
 }

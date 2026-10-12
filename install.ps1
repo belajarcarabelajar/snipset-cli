@@ -24,6 +24,10 @@ Also add the install directory to the user PATH.
 Register the snipset MCP server with these harnesses: claude, codex, gemini, opencode, cursor, vscode,
 or all. Accepts one comma-separated string or several strings.
 
+.PARAMETER Database
+Path to the Snipset database that registered MCP servers should use (passed as --db). The Windows form
+of install.sh --db. Defaults to the CLI's own location.
+
 .PARAMETER From
 Install from a local directory holding SHA256SUMS and the release zip instead of downloading.
 
@@ -49,7 +53,8 @@ Installs v0.2.0 into $env:LOCALAPPDATA\Snipset\bin and adds that directory to th
 
 Prints the steps for installing v0.1.0 and registering MCP for Claude Code and Codex, without writing anything.
 #>
-[CmdletBinding()]
+# Named only: -Db is the alias of the common -Debug, so "-Db x" would otherwise quietly bind x to -Version.
+[CmdletBinding(PositionalBinding = $false)]
 param(
   [string]$Version,
   [string]$InstallDir,
@@ -59,7 +64,8 @@ param(
   [switch]$DryRun,
   [switch]$Check,
   [switch]$Update,
-  [switch]$Uninstall
+  [switch]$Uninstall,
+  [string]$Database
 )
 # The one-liner runs inside the caller's session, whose strict mode would otherwise reach every part.
 Set-StrictMode -Off
@@ -241,12 +247,36 @@ function Test-SnipsetArchive {
     $zipArchive.Dispose()
   }
 }
-function Test-SnipsetBinary {
-  param([string]$Path)
+function Invoke-SnipsetVersionProbe {
+  param([string]$Exe)
   # Windows PowerShell 5.1 turns native stderr into a terminating error under 'Stop'; this scope only.
   $ErrorActionPreference = 'Continue'
-  try { $out = @(& $Path --version 2>$null) } catch { return $false }
-  ($LASTEXITCODE -eq 0) -and (($out -join "`n").StartsWith('snipset '))
+  try { $out = @(& $Exe --version 2>$null) } catch { return @{ ExitCode = $null; Output = '' } }
+  @{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n") }
+}
+function Test-SnipsetBinary {
+  param([string]$Path)
+  $probe = Invoke-SnipsetVersionProbe -Exe $Path
+  # The caller's $run keeps the probe, so Install-SnipsetBinary reads the exit code without starting a failing exe twice.
+  if ($run -is [hashtable]) { $run.probe = $probe }
+  ($probe.ExitCode -eq 0) -and "$($probe.Output)".StartsWith('snipset ')
+}
+function Clear-SnipsetOldExe {
+  param([string]$InstallDir, [string]$Status = 'NOTE')
+  if (-not (Test-Path -LiteralPath $InstallDir -PathType Container)) { return }
+  # A regex and not -Filter, whose wildcard also matches 8.3 short names; [0-9] and \z keep out other digits and a trailing newline.
+  $pattern = '^snipset\.exe\.old-[0-9]+(-[0-9a-f]{8})?\z'
+  foreach ($item in @(Get-ChildItem -LiteralPath $InstallDir -Force)) {
+    if ($item.Name -cnotmatch $pattern -or $item.PSIsContainer -or $item.LinkType) { continue }
+    try {
+      Remove-Item -LiteralPath $item.FullName -Force
+    } catch [IO.IOException], [UnauthorizedAccessException] {
+      Write-SnipsetReport -Status NOTE -Item 'binary' -Detail "$($item.FullName) is still in use; it is deleted on the next install or uninstall after that program exits"
+      continue
+    }
+    $detail = if ($Status -eq 'REMOVED') { $item.FullName } else { "deleted $($item.FullName), left by an earlier update" }
+    Write-SnipsetReport -Status $Status -Item 'binary' -Detail $detail
+  }
 }
 function Get-SnipsetInstalledVersion {
   param([string]$InstallDir)
@@ -266,7 +296,8 @@ function Move-SnipsetExe {
     Move-Item -LiteralPath $Candidate -Destination $Exe -Force
     return 'moved'
   } catch [IO.IOException], [UnauthorizedAccessException] { }
-  $aside = "$Exe.old-$PID"
+  # $PID alone repeats for two updates in one session, and the first aside may still be running.
+  $aside = "$Exe.old-$PID-" + [guid]::NewGuid().ToString('N').Substring(0, 8)
   try { Move-Item -LiteralPath $Exe -Destination $aside -Force } catch [IO.IOException], [UnauthorizedAccessException] { return 'in-use' }
   try {
     Move-Item -LiteralPath $Candidate -Destination $Exe -Force
@@ -285,7 +316,14 @@ function Install-SnipsetBinary {
   if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'install.ps1: archive has no snipset.exe' }
   $windows = Test-SnipsetWindowsHost
   if ($windows) {
-    if (-not (Test-SnipsetBinary -Path $candidate)) { throw 'install.ps1: the downloaded snipset.exe failed "snipset.exe --version"; the installed snipset.exe was not changed' }
+    if ($run -is [hashtable]) { $run.probe = $null }
+    if (-not (Test-SnipsetBinary -Path $candidate)) {
+      # 0xC0000135, STATUS_DLL_NOT_FOUND: the loader stopped before snipset.exe ran.
+      if (($run -is [hashtable]) -and $run.probe -and ($run.probe.ExitCode -eq -1073741515)) {
+        throw 'install.ps1: snipset.exe could not start: it needs libcrypto-3-x64.dll and VCRUNTIME140.dll, which this release does not ship; see the README Windows notes'
+      }
+      throw 'install.ps1: the downloaded snipset.exe failed "snipset.exe --version"; the installed snipset.exe was not changed'
+    }
   } else {
     Write-SnipsetReport -Status SKIP -Item 'smoke' -Detail 'not a Windows host'
   }
@@ -297,6 +335,7 @@ function Install-SnipsetBinary {
     throw "install.ps1: $exe exists and is not a snipset install; move it aside or pass -InstallDir"
   }
   if ($windows) {
+    Clear-SnipsetOldExe -InstallDir $InstallDir
     $moved = Move-SnipsetExe -Candidate $candidate -Exe $exe
     if ($moved -eq 'in-use') {
       Write-SnipsetReport -Status FAIL -Item 'binary' -Detail 'in use (close the program using it)'
@@ -723,6 +762,24 @@ function Remove-SnipsetMcp {
 # The called functions read these locals and the parameters through dynamic scoping, never a script-scope prefix:
 # the README one-liner runs install.ps1 as a scriptblock, where the script scope is the caller's session.
 
+function Assert-SnipsetDatabase {
+  param([string]$Database)
+  # install.sh refuses the same character in --db.
+  if ($Database -match '"') { throw "install.ps1: the database path must not contain `" (got $Database)" }
+}
+
+# Mirrors db_check in install.sh. There is no init step on Windows, so the file is only reported.
+function Test-SnipsetDatabase {
+  param([string]$Database)
+  if (-not $Database) {
+    Write-SnipsetReport -Status SKIP -Item 'database' -Detail 'the CLI default'
+  } elseif (Test-Path -LiteralPath $Database) {
+    Write-SnipsetReport -Status OK -Item 'database' -Detail $Database
+  } else {
+    Write-SnipsetReport -Status MISSING -Item 'database' -Detail $Database
+  }
+}
+
 function Test-SnipsetExe {
   param([string]$InstallDir)
   $exe = Join-Path $InstallDir 'snipset.exe'
@@ -785,6 +842,7 @@ function Remove-SnipsetInstallDir {
 
 function Invoke-SnipsetInstall {
   param([string[]]$McpIds = @())
+  Assert-SnipsetDatabase -Database $Database
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0; zip = $null }
   $Version = Resolve-SnipsetVersion
   $archive = "snipset-cli-$Version-$target.zip"
@@ -801,7 +859,8 @@ function Invoke-SnipsetInstall {
     Invoke-SnipsetAction -Description "check the entries of $archive" -Action { Test-SnipsetArchive -Zip $run.zip }
     Invoke-SnipsetAction -Description "install snipset.exe to $exe" -Action { Install-SnipsetBinary -Zip $run.zip -Stage $stage -InstallDir $InstallDir }
     if ($AddPath) { Invoke-SnipsetAction -Description "add $InstallDir to the user PATH" -Action { Install-SnipsetPathEnv -Dir $InstallDir } }
-    foreach ($id in $McpIds) { Invoke-SnipsetAction -Description "register the snipset MCP server for $id" -Action { Install-SnipsetMcp -Ids @($id) -Bin $exe } }
+    $dbNote = if ($Database) { " with --db $Database" } else { '' }
+    foreach ($id in $McpIds) { Invoke-SnipsetAction -Description "register the snipset MCP server for $id$dbNote" -Action { Install-SnipsetMcp -Ids @($id) -Bin $exe -Db $Database } }
     if ($run.fail -gt 0) { throw "install: $($run.fail) steps failed" }
     if ($DryRun) { Write-Output 'dry run: nothing was written' } else { Write-Output "Installed snipset $Version to $exe" }
   } finally {
@@ -812,8 +871,10 @@ function Invoke-SnipsetInstall {
 
 function Invoke-SnipsetCheck {
   param([string[]]$McpIds = @())
+  Assert-SnipsetDatabase -Database $Database
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }
   Test-SnipsetExe -InstallDir $InstallDir
+  Test-SnipsetDatabase -Database $Database
   if ($AddPath) { Test-SnipsetPathEnv -Dir $InstallDir }
   if ($McpIds.Count) {
     Test-SnipsetMcp -Ids $McpIds -Bin (Join-Path $InstallDir 'snipset.exe')
@@ -828,6 +889,7 @@ function Invoke-SnipsetCheck {
 
 function Invoke-SnipsetUpdate {
   param([string[]]$McpIds = @())
+  Assert-SnipsetDatabase -Database $Database
   if ($DryRun) {
     Invoke-SnipsetInstall -McpIds $McpIds
     return
@@ -846,10 +908,11 @@ function Invoke-SnipsetUninstall {
   param([string[]]$McpIds = @())
   # The remove functions delete for real, so there is nothing safe to preview.
   if ($DryRun) { throw 'install.ps1: -DryRun cannot preview -Uninstall; run -Check to see what is installed' }
+  Assert-SnipsetDatabase -Database $Database
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }
   $exe = Join-Path $InstallDir 'snipset.exe'
   if ($McpIds.Count) {
-    Remove-SnipsetMcp -Ids $McpIds -Bin $exe
+    Remove-SnipsetMcp -Ids $McpIds -Bin $exe -Db $Database
   } else {
     Write-SnipsetReport -Status SKIP -Item 'mcp' -Detail 'no -WithMcp list'
   }
@@ -857,6 +920,7 @@ function Invoke-SnipsetUninstall {
   # The exe goes first: the PATH entry stays while a kept or locked exe still sits in the dir.
   $exeKept = [bool](Get-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue)
   Remove-SnipsetPathEnv -Dir $InstallDir -ExeKept:$exeKept
+  Clear-SnipsetOldExe -InstallDir $InstallDir -Status REMOVED
   Remove-SnipsetInstallDir -InstallDir $InstallDir
   Write-Output "uninstall: removed $($run.removed), kept $($run.kept)"
   if ($run.fail -gt 0) { throw "uninstall: $($run.fail) steps failed" }
