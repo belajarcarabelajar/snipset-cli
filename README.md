@@ -93,7 +93,8 @@ Rules:
 - `--check` and `--uninstall` look only where you point them. Pass the same `--install-dir`, `--share-dir`, `--bashrc`, `--db`, and `--with-mcp` flags you used for the install. `--check` also needs `--add-path` to check PATH.
 - `--dry-run --uninstall` is refused, because the remove steps cannot be previewed. Run `--check` to see what is installed.
 - The database is never removed.
-- Empty directories may remain after uninstall, for example `~/.local/bin`.
+- Uninstall removes the directories the install created, deepest first, when they are empty. The install records them in `<install-dir>/.snipset-dirs`. A directory that existed before the install, or that still holds a file, stays. Directories made by an installer older than this record are not in it and can stay behind empty.
+- The installer tracks the shell files it writes in `<share-dir>/.snipset-bundle`. A `snipset.sh`, `completion.bash`, or `tab.sh` there that it did not write, or that you edited, is kept: install and uninstall print `[KEEP]`, and the bashrc block is not added while one is kept, because it would source that file at every login. Delete the file to let the installer manage it again.
 
 ```sh
 bash install-snipset.sh --check --add-path --with-mcp=claude,opencode
@@ -165,6 +166,7 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 | `-InstallDir` | Directory for `snipset.exe`. Default: `$env:LOCALAPPDATA\Snipset\bin`. |
 | `-AddPath` | Add the install dir to the User `Path`. |
 | `-WithMcp` | Register MCP for `claude`, `codex`, `gemini`, `opencode`, `cursor`, `vscode`, or `all`. One comma string or several strings. |
+| `-Database` | Database the registered MCP servers use, passed as `--db`: the Windows form of `--db`. `-Check` reports whether the file exists. There is no `snipset init` step on Windows. `-Db` is not accepted, because PowerShell reserves it as the alias of `-Debug`. |
 | `-From` | Install from a directory that holds `SHA256SUMS` and the release zip. No download. |
 | `-DryRun` | Print one `[DRY]` line per step and write nothing. |
 | `-Check` | Report whether the install is current. Throws on drift. |
@@ -181,7 +183,10 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 - Use only one of `-Check`, `-Update`, `-Uninstall`. `-DryRun -Uninstall` is refused; run `-Check` instead.
 - Usage errors, refusals, and drift throw, so `pwsh -File install.ps1` ends with status 1. The script never closes the session it runs in.
 - User `Path`: the script reads and writes the raw value in `HKCU\Environment`, so entries such as `%USERPROFILE%\bin` stay unexpanded. It then tells Windows that the environment changed. Open a new terminal to use `snipset`.
-- `-Check` looks at the User `Path` only when you pass `-AddPath`. Pass the same `-InstallDir` and `-WithMcp` as the install.
+- `-Check` looks at the User `Path` only when you pass `-AddPath`. Pass the same `-InstallDir`, `-WithMcp`, and `-Database` as the install.
+- Parameters are named only; a positional value, such as a stray `-Db x`, is refused before anything is written.
+- The v0.2.0 `snipset.exe` imports `libcrypto-3-x64.dll` (OpenSSL 3) and `VCRUNTIME140.dll` (the Microsoft Visual C++ runtime), and the zip ships neither. This was read from the import table with `objdump -p`, not run on Windows. Without both on the DLL search path the exe cannot start: the installer stops with a message naming them, and the installed `snipset.exe` stays as it was.
+- An update over a `snipset.exe` that is in use renames it to `snipset.exe.old-<pid>-<8 hex>`. The next install, update, or uninstall deletes those files once the program using them has exited.
 
 ## Package managers
 
@@ -220,6 +225,8 @@ Homebrew (Linux only), from `Formula/snipset.rb` in this repo:
 brew tap belajarcarabelajar/snipset https://github.com/belajarcarabelajar/snipset-cli
 brew install belajarcarabelajar/snipset/snipset
 ```
+
+The formula installs the prebuilt binary, which needs the host's `libcrypto.so.3` (OpenSSL 3) and glibc 2.34 or newer. The formula does not install them: the binary has no RPATH and Homebrew's `openssl@3` is keg-only, so depending on it would not change which library loads.
 
 Nix (x86_64-linux), from `flake.nix` in this repo:
 
@@ -314,7 +321,9 @@ The CLI works against a standalone database created by `snipset init`, or agains
 - wget cannot refuse a redirect from https to http; curl can, and the installer uses curl when it is present.
 - `--check` or `--uninstall` with `--with-mcp=claude` runs `claude mcp get`, which updates Claude's own state files.
 - The output formats of `codex`, `gemini`, and VS Code were not observed, and the Windows config paths for Cursor, Codex, and Gemini are inferred.
-- Uninstall may leave empty directories (for example `~/.local/bin` or `~/.config/opencode`); it removes an empty share dir on Linux and an empty install dir on Windows.
+- Uninstall removes only the empty directories the install created. A directory that existed before the install, still holds a file, or was made by an older installer stays; on Windows the empty install dir is removed.
+- The Windows v0.2.0 exe needs `libcrypto-3-x64.dll` and `VCRUNTIME140.dll`, which the zip does not ship.
+- The Homebrew formula relies on the host's `libcrypto.so.3` (OpenSSL 3) and glibc 2.34 or newer.
 - `--check` needs the same flags as the install.
 - The EULA in `LICENSE` applies to every channel.
 
