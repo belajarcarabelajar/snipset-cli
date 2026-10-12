@@ -76,6 +76,58 @@ rewrite_from() {
   fi
   rewrite_file "$file" "$new"
 }
+dirs_record_present() {
+  [[ -e "${install_dir}/.snipset-dirs" || -L "${install_dir}/.snipset-dirs" ]]
+}
+# Adds each PATH not yet listed to the install dir's .snipset-dirs record. The old lines
+# are kept, and the new record replaces the file, so a symlink there is not followed.
+dirs_record_add() {
+  local rec="${install_dir}/.snipset-dirs" old="" text path new=""
+  if [[ -f "$rec" && ! -L "$rec" ]]; then
+    # Without the x, an unreadable record would read as empty and lose its lines.
+    old="$(cat -- "$rec" 2>/dev/null && printf x)" || old=""
+    if [[ "$old" != *x ]]; then
+      report FAIL 'dirs record' "${rec} could not be read"
+      return 0
+    fi
+    old="${old%x}"
+  fi
+  text="$old"
+  [[ -z "$text" || "$text" == *$'\n' ]] || text+=$'\n'
+  for path in "$@"; do
+    # The record is one path per line.
+    [[ "$path" != *$'\n'* ]] || continue
+    [[ $'\n'"$text" != *$'\n'"$path"$'\n'* ]] || continue
+    text+="${path}"$'\n'
+  done
+  # An empty record still marks an install made by this installer.
+  [[ "$text" != "$old" || -L "$rec" || ! -e "$rec" ]] || return 0
+  if new="$(mktemp "${rec}.XXXXXX" 2>/dev/null)" && printf '%s' "$text" > "$new" && mv -f -- "$new" "$rec"; then
+    return 0
+  fi
+  [[ -z "$new" ]] || rm -f -- "$new"
+  report FAIL 'dirs record' "${rec} could not be written"
+}
+# mkdir -p DIR, then records each directory it created, so --uninstall can remove
+# exactly those (when empty) and never one the user already had.
+mkdir_recorded() {
+  local probe="$1" up
+  local -a made=()
+  while [[ ! -e "$probe" && ! -L "$probe" ]]; do
+    made+=("$probe")
+    up="$(dirname -- "$probe")"
+    [[ "$up" != "$probe" ]] || break
+    probe="$up"
+  done
+  mkdir -p -- "$1" || return 1
+  ((${#made[@]} == 0)) || dirs_record_add "${made[@]}"
+}
+share_removed=0
+# Without a record (an older install, or a second uninstall) the share dir goes only
+# when this uninstall deleted an installer file from it, so a user's own dir stays.
+share_dir_fallback_rmdir() {
+  dirs_record_present || ((share_removed == 0)) || rmdir "$share_dir" 2>/dev/null || true
+}
 rewrite_fail() {
   if [[ -z "$rewrite_backup" ]]; then
     report FAIL "$1" "$2 left unchanged"
@@ -328,7 +380,7 @@ binary_verify() {
   [[ $'\n'"$verbose" != *$'\n'h* ]] || die 'hard links are not allowed in release archives'
 }
 binary_stage() {
-  mkdir -p "$install_dir"
+  mkdir_recorded "$install_dir"
   stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
   # As root, tar would otherwise keep the packer's uid and mode bits.
   tar --no-same-owner --no-same-permissions -xzf "${1}/${archive}" -C "$stage"
@@ -383,6 +435,9 @@ binary_place() {
     chmod 755 "${stage}/shell/snipset-shims.sh"
     mv -f "${stage}/shell/snipset-shims.sh" "${install_dir}/snipset-shims"
   fi
+  # Written only after the binary is placed, so an install refused or aborted before
+  # that leaves an existing install dir as it was.
+  dirs_record_add
 }
 binary_installed_version() {
   local out v
@@ -500,7 +555,7 @@ pathenv_same() {
 pathenv_line_add() {
   local line
   line="$(pathenv_source_line)"
-  mkdir -p "${1%/*}"
+  mkdir_recorded "${1%/*}"
   touch "$1"
   grep -Fqx -- "$line" "$1" || printf '\n%s\n' "$line" >> "$1"
 }
@@ -527,7 +582,7 @@ pathenv_marked() {
 pathenv_put() {
   local label="$1" file="$2" fn="$3" hint="$4"
   if [[ ! -e "$file" && ! -L "$file" ]]; then
-    if mkdir -p "${file%/*}" 2>/dev/null && "$fn" 2>/dev/null > "$file"; then
+    if mkdir_recorded "${file%/*}" 2>/dev/null && "$fn" 2>/dev/null > "$file"; then
       return 0
     fi
     report FAIL "$label" "$file could not be written"
@@ -614,6 +669,7 @@ pathenv_remove_managed() {
   elif ! pathenv_same "$2" "$3"; then
     report KEEP "$1" "$2 edited; remove it by hand"
   elif rm -f -- "$2" 2>/dev/null && [[ ! -e "$2" ]]; then
+    [[ "${2%/*}" != "$share_dir" ]] || share_removed=1
     report REMOVED "$1" "$2"
   else
     report FAIL "$1" "$2 could not be removed"
@@ -660,7 +716,7 @@ pathenv_remove() {
     pathenv_remove_managed 'path env.fish' "${share_dir}/env.fish" "$(pathenv_fish_env_text; printf x)" && found=1
   fi
   ((found)) || report SKIP path 'nothing to remove'
-  rmdir "$share_dir" 2>/dev/null || true
+  share_dir_fallback_rmdir
 }
 shell_marker='# snipset-terminal-integration (managed by snipset installer; safe to remove)'
 shell_kept=()
@@ -706,7 +762,7 @@ shell_bundle_place() {
   local name path want lines=""
   shell_kept=()
   if ((do_shell)) && ((has_shell)); then
-    mkdir -p "$share_dir"
+    mkdir_recorded "$share_dir"
     for name in snipset.sh completion.bash tab.sh; do
       path="${share_dir}/${name}"
       if [[ -e "$path" || -L "$path" ]]; then
@@ -836,6 +892,7 @@ shell_manifest_remove() {
     report KEEP 'shell manifest' "${manifest}: listed files remain"
   else
     rm -f -- "$manifest"
+    share_removed=1
     report REMOVED 'shell manifest' "$manifest"
   fi
 }
@@ -859,6 +916,7 @@ shell_remove() {
     case "$shell_why" in
       '')
         rm -f -- "$path"
+        share_removed=1
         report REMOVED "shell ${name}" "$path"
         ;;
       changed) report KEEP "shell ${name}" "${path} changed since the installer wrote it; remove it by hand" ;;
@@ -891,7 +949,7 @@ shell_remove() {
       rewrite_fail 'shell block' "$bashrc"
     fi
   fi
-  rmdir "$share_dir" 2>/dev/null || true
+  share_dir_fallback_rmdir
 }
 db_init() {
   local snipset_bin="${install_dir}/snipset"
@@ -1209,7 +1267,7 @@ mcp_install() {
     case "$id" in
       opencode|cursor)
         if [[ "$state" == absent ]]; then
-          mkdir -p "$(dirname "$file")"
+          mkdir_recorded "$(dirname "$file")"
           mcp_file_content "$id" > "$file"
           report ADD "$id" "wrote ${file}"
           continue
@@ -1454,6 +1512,58 @@ do_update() {
   fi
   do_install
 }
+# Prints, one per line, every directory an install with the current flags may create
+# (the parent of each file it writes, and their ancestors up to, not including, HOME
+# or /), using the same expressions as the mkdir_recorded call sites.
+dirs_candidates() {
+  local home="${HOME%"${HOME##*[!/]}"}" target path up id file
+  local -a ids targets=("$install_dir" "$share_dir" "${bashrc%/*}")
+  file="$(pathenv_fish_conf)"
+  targets+=("${file%/*}" "${HOME}/.config/fish/conf.d")
+  file="$(pathenv_zshenv)"
+  targets+=("${file%/*}")
+  read -r -a ids <<< "$mcp_list"
+  for id in "${ids[@]}"; do
+    case "$id" in
+      opencode|cursor) targets+=("$(dirname "$(mcp_file "$id")")") ;;
+    esac
+  done
+  for target in "${targets[@]}"; do
+    path="$target"
+    while [[ -n "$path" && "$path" != . && "${path%"${path##*[!/]}"}" != "$home" && -n "${path%"${path##*[!/]}"}" ]]; do
+      printf '%s\n' "$path"
+      up="$(dirname -- "$path")"
+      [[ "$up" != "$path" ]] || break
+      path="$up"
+    done
+  done
+}
+# Runs last: removes, deepest first, each recorded directory that the current flags
+# could have created, that is a real directory, and that rmdir finds empty.
+dirs_remove() {
+  local rec="${install_dir}/.snipset-dirs" text cands path
+  if [[ -L "$rec" ]]; then
+    report KEEP 'dirs record' "${rec} symlink left in place"
+    return 0
+  fi
+  [[ -f "$rec" ]] || return 0
+  text="$(cat -- "$rec" 2>/dev/null && printf x)" || text=""
+  if [[ "$text" != *x ]]; then
+    report FAIL 'dirs record' "${rec} could not be read"
+    return 0
+  fi
+  rm -f -- "$rec"
+  cands=$'\n'"$(dirs_candidates)"$'\n'
+  while IFS= read -r path; do
+    [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
+    # A .. component could name HOME or / under another spelling.
+    [[ "/${path}/" != */../* ]] || continue
+    [[ -d "$path" && ! -L "$path" ]] || continue
+    if rmdir -- "$path" 2>/dev/null; then
+      report REMOVED dir "$path"
+    fi
+  done < <(printf '%s' "${text%x}" | awk '{ print length($0) "\t" $0 }' | sort -k1,1nr | cut -f2-)
+}
 do_uninstall() {
   # The remove functions delete for real, so there is nothing safe to preview.
   if ((dry_run)); then
@@ -1465,6 +1575,7 @@ do_uninstall() {
   shell_remove
   pathenv_remove
   binary_remove
+  dirs_remove
   printf 'uninstall: removed %d, kept %d\n' "$n_removed" "$n_kept"
   ((n_fail == 0)) || exit 1
 }

@@ -43,7 +43,7 @@ shell_bundle_place() {
   local name path want lines=""
   shell_kept=()
   if ((do_shell)) && ((has_shell)); then
-    mkdir -p "$share_dir"
+    mkdir_recorded "$share_dir"
     for name in snipset.sh completion.bash tab.sh; do
       path="${share_dir}/${name}"
       if [[ -e "$path" || -L "$path" ]]; then
@@ -173,6 +173,7 @@ shell_manifest_remove() {
     report KEEP 'shell manifest' "${manifest}: listed files remain"
   else
     rm -f -- "$manifest"
+    share_removed=1
     report REMOVED 'shell manifest' "$manifest"
   fi
 }
@@ -196,6 +197,7 @@ shell_remove() {
     case "$shell_why" in
       '')
         rm -f -- "$path"
+        share_removed=1
         report REMOVED "shell ${name}" "$path"
         ;;
       changed) report KEEP "shell ${name}" "${path} changed since the installer wrote it; remove it by hand" ;;
@@ -228,5 +230,5 @@ shell_remove() {
       rewrite_fail 'shell block' "$bashrc"
     fi
   fi
-  rmdir "$share_dir" 2>/dev/null || true
+  share_dir_fallback_rmdir
 }

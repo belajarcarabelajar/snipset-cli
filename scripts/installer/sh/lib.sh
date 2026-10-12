@@ -75,6 +75,58 @@ rewrite_from() {
   fi
   rewrite_file "$file" "$new"
 }
+dirs_record_present() {
+  [[ -e "${install_dir}/.snipset-dirs" || -L "${install_dir}/.snipset-dirs" ]]
+}
+# Adds each PATH not yet listed to the install dir's .snipset-dirs record. The old lines
+# are kept, and the new record replaces the file, so a symlink there is not followed.
+dirs_record_add() {
+  local rec="${install_dir}/.snipset-dirs" old="" text path new=""
+  if [[ -f "$rec" && ! -L "$rec" ]]; then
+    # Without the x, an unreadable record would read as empty and lose its lines.
+    old="$(cat -- "$rec" 2>/dev/null && printf x)" || old=""
+    if [[ "$old" != *x ]]; then
+      report FAIL 'dirs record' "${rec} could not be read"
+      return 0
+    fi
+    old="${old%x}"
+  fi
+  text="$old"
+  [[ -z "$text" || "$text" == *$'\n' ]] || text+=$'\n'
+  for path in "$@"; do
+    # The record is one path per line.
+    [[ "$path" != *$'\n'* ]] || continue
+    [[ $'\n'"$text" != *$'\n'"$path"$'\n'* ]] || continue
+    text+="${path}"$'\n'
+  done
+  # An empty record still marks an install made by this installer.
+  [[ "$text" != "$old" || -L "$rec" || ! -e "$rec" ]] || return 0
+  if new="$(mktemp "${rec}.XXXXXX" 2>/dev/null)" && printf '%s' "$text" > "$new" && mv -f -- "$new" "$rec"; then
+    return 0
+  fi
+  [[ -z "$new" ]] || rm -f -- "$new"
+  report FAIL 'dirs record' "${rec} could not be written"
+}
+# mkdir -p DIR, then records each directory it created, so --uninstall can remove
+# exactly those (when empty) and never one the user already had.
+mkdir_recorded() {
+  local probe="$1" up
+  local -a made=()
+  while [[ ! -e "$probe" && ! -L "$probe" ]]; do
+    made+=("$probe")
+    up="$(dirname -- "$probe")"
+    [[ "$up" != "$probe" ]] || break
+    probe="$up"
+  done
+  mkdir -p -- "$1" || return 1
+  ((${#made[@]} == 0)) || dirs_record_add "${made[@]}"
+}
+share_removed=0
+# Without a record (an older install, or a second uninstall) the share dir goes only
+# when this uninstall deleted an installer file from it, so a user's own dir stays.
+share_dir_fallback_rmdir() {
+  dirs_record_present || ((share_removed == 0)) || rmdir "$share_dir" 2>/dev/null || true
+}
 rewrite_fail() {
   if [[ -z "$rewrite_backup" ]]; then
     report FAIL "$1" "$2 left unchanged"

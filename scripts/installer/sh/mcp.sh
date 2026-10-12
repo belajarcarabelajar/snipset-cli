@@ -183,7 +183,7 @@ mcp_install() {
     case "$id" in
       opencode|cursor)
         if [[ "$state" == absent ]]; then
-          mkdir -p "$(dirname "$file")"
+          mkdir_recorded "$(dirname "$file")"
           mcp_file_content "$id" > "$file"
           report ADD "$id" "wrote ${file}"
           continue
