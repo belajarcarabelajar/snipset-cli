@@ -23,3 +23,13 @@ Source: `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/learnin
 - WHEN scanning commits for attribution here → DO match credit-line shapes (`Co-Authored-By`, `Generated with`, the robot emoji), NOT product names such as Claude Code, which this repository names as an MCP harness.
 - WHEN writing a long artifact (a plan or report over about 20 KB) → DO write it in parts with a one-line status between parts, NOT compose it all before the first write (the owner read the silence as a hang).
 - WHEN `~/vivera/scripts/ultra-plan-runner.mjs --execute` runs after the plan file was edited → DO run `plan-publish.mjs <plan>` first and keep the runner's own exit code (`rc=$?; ...; exit $rc`), NOT read a wrapped `; echo` exit 0 as a pass. Measured: after the follow-up commits the runner printed `MIRROR GATE: BLOCKED` and ran nothing while the background task reported exit 0.
+
+## Task Group: snipset-cli / deferred hardening (records, Windows parameters, probes)
+
+Source: `docs/code-plan/sessions/2026-10-12-snipset-cli-deferred-hardening/learning-ledger.md`.
+
+- WHEN adding a parameter to an advanced PowerShell script (`[CmdletBinding()]`) → DO check the name against the common-parameter aliases (`db` Debug, `vb` Verbose, `ea`, `ev`, `wa`, `wv`, `ov`, `ob`, `pv`, `iv`, `infa`), NOT pick the name that mirrors another installer's flag. Measured: `[string]$Db` made every `install.ps1` call fail ("conflicts with the parameter alias of the same name for parameter 'Debug'"); the parameter became `-Database`.
+- WHEN the parent writes scratch files while chunks run → DO prefix them `parent-` in `~/.cache`, NOT a task id: a chunk cleaning its own `t07-*` scratch took the parent's `t07-green.log` with it.
+- WHEN a change makes an installer start a program it already started in the same path → DO reuse the first result and compare the suite wall time before and after, NOT accept a green run. Measured: a second `--version` start of the Linux fixture (about 35 s each) pushed a platform test past 60 s; the ps1 suites went from 92 s to 178 s.
+- WHEN a test environment is scrubbed → DO check that the tests still reach the same code paths (the installer's notes in the output), NOT only that they pass. Measured: the default tool set sent the legacy tests through the glibc "could not determine" fallback and dropped `timeout` from the smoke run.
+- WHEN an installer change alters what uninstall removes → DO run the upgrade path once in a temp HOME (the previous release's `install.sh`, then the new install and uninstall) before review, NOT rely on simulated older installs. Measured: only that run showed the default share dir left behind, which the previous uninstall removed.
