@@ -154,11 +154,10 @@ esac
 `;
 }
 
-function geminiSettings(sb, command) {
-  writeFile(
-    join(sb.home, ".gemini", "settings.json"),
-    `${JSON.stringify({ mcpServers: { snipset: { command, args: ["mcp"] } } }, null, 2)}\n`,
-  );
+// A string is the command of a lone "snipset" entry; an object is the whole mcpServers map.
+function geminiSettings(sb, servers) {
+  const mcpServers = typeof servers === "string" ? { snipset: { command: servers, args: ["mcp"] } } : servers;
+  writeFile(join(sb.home, ".gemini", "settings.json"), `${JSON.stringify({ mcpServers }, null, 2)}\n`);
 }
 
 const removes = (sb) => calls(sb).filter((argv) => argv[2] === "remove");
@@ -396,4 +395,50 @@ test("gemini: uninstall removes the user settings entry for the binary even when
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(removes(sb), [["gemini", "mcp", "remove", "--scope", "user", "snipset"]]);
   assert.deepEqual(results(r.stdout), ["[REMOVED] gemini: snipset"]);
+});
+
+test("gemini: a snipset-dev entry for the binary does not make a foreign snipset entry ours", async () => {
+  const { sb, bin, args } = setup({ stubs: ["gemini"] });
+  const foreign = { command: "/opt/other/snipset", args: ["mcp"] };
+  const dev = { command: bin, args: ["mcp"] };
+  for (const servers of [{ snipset: foreign, "snipset-dev": dev }, { "snipset-dev": dev, snipset: foreign }]) {
+    seed(sb, "gemini", foreign.command);
+    geminiSettings(sb, servers);
+    const order = Object.keys(servers).join(",");
+    const check = await runInstaller(sb, [...args, "--check", "--with-mcp=gemini"]);
+    assert.deepEqual(results(check.stdout), ["[KEEP] gemini: snipset points elsewhere"], order);
+    const r = await runInstaller(sb, [...args, "--uninstall", "--with-mcp=gemini"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(removes(sb), [], order);
+    assert.deepEqual(results(r.stdout), ["[KEEP] gemini: snipset points elsewhere"], order);
+    assert.ok(existsSync(join(sb.home, ".gemini", "settings.json")), order);
+  }
+});
+
+test("gemini: a nested object holding the binary inside a foreign snipset entry is not ours", async () => {
+  const { sb, bin, args } = setup({ stubs: ["gemini"] });
+  geminiSettings(sb, { snipset: { env: { command: bin }, command: "/opt/other/snipset", args: ["mcp"] } });
+  const r = await runInstaller(sb, [...args, "--uninstall", "--with-mcp=gemini"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), ["[KEEP] gemini: snipset points elsewhere"]);
+});
+
+test("gemini: a dot in the binary path does not match a path that differs at the dot", async () => {
+  const { sb } = setup({ stubs: ["gemini"] });
+  const installDir = join(sb.home, "my.bin");
+  geminiSettings(sb, join(sb.home, "myXbin", "snipset"));
+  const r = await runInstaller(sb, [...BASE, "--install-dir", installDir, "--uninstall", "--with-mcp=gemini"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), ["[KEEP] gemini: snipset points elsewhere"]);
+});
+
+test("gemini: a dot in the binary path still matches its own entry", async () => {
+  const { sb } = setup({ stubs: ["gemini"] });
+  const installDir = join(sb.home, "my.bin");
+  const bin = join(installDir, "snipset");
+  geminiSettings(sb, bin);
+  const check = await runInstaller(sb, [...BASE, "--install-dir", installDir, "--check", "--with-mcp=gemini"]);
+  assert.deepEqual(results(check.stdout), [`[OK] gemini: snipset points at ${bin}`]);
 });
