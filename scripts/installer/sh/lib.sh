@@ -8,6 +8,7 @@ set -euo pipefail
 n_drift=0
 n_kept=0
 n_removed=0
+n_fail=0
 note() { printf 'install.sh: %s\n' "$1" >&2; }
 die() {
   note "$1"
@@ -20,6 +21,7 @@ report() {
     DRIFT|MISSING) n_drift=$((n_drift + 1)) ;;
     KEEP) n_kept=$((n_kept + 1)) ;;
     REMOVED) n_removed=$((n_removed + 1)) ;;
+    FAIL) n_fail=$((n_fail + 1)) ;;
   esac
 }
 act() {
