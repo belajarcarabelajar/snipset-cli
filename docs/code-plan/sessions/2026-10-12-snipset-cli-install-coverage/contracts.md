@@ -93,7 +93,7 @@ A mechanical, behaviour-preserving split. No new behaviour, no new flags (T04 do
 - `tests/install.test.mjs`: replace the `root`/`script` lookup with `installerPath("sh")` from `tests/helpers/install-sandbox.mjs`. No other change.
 - `tests/installer-build.test.mjs`: `build.mjs --check --target sh` exits 0 on the repo; on a temp copy (`--root`) a one-character edit in a part makes `--check` exit 1 naming `install.sh`, and building again makes it exit 0; every part passes `bash -n`; every part starts with the shellcheck header; the bundle starts with the shebang and the notice; `ORDER` names exactly the part files; a missing `ORDER` for `--target ps1` exits 1; an unknown target exits 2; the bundle prints the same usage lines as before (assert each line of today's usage text is present).
 
-RED: `timeout 120 bun test --timeout 30000 tests/installer-build.test.mjs` exits 1. GREEN: that file plus `tests/install.test.mjs` exit 0 (17 pass); `bun scripts/installer/build.mjs --check --target sh`, `shellcheck -S warning install.sh`, and `bash -c 'shellcheck -S warning scripts/installer/sh/*.sh'` exit 0.
+RED: `timeout 120 bun test --timeout 30000 tests/installer-build.test.mjs` exits 1. GREEN: that file plus `tests/install.test.mjs` exit 0 (14 pass); `bun scripts/installer/build.mjs --check --target sh`, `shellcheck -S warning install.sh`, and `bash -c 'shellcheck -S warning scripts/installer/sh/*.sh'` exit 0.
 
 ## C18 (T18): Scoop bucket, owner `nappy`
 
@@ -159,4 +159,4 @@ Turn the T02 parts into the function interface of the plan's Contract section (p
 - `main.sh`: `parse_args "$@"`, then dispatch on `mode`; the final `Installed snipset ...` line stays in `do_install`.
 - `tests/install-cli.test.mjs` (use the T01 helper): `--help` and `-h` list every old and new flag and exit 0; an unknown flag, `--check --uninstall`, `--with-mcp=bogus`, and `--from` with no value each exit 2 with usage on stderr; `--dry-run --version 0.1.0` exits 0, prints `[DRY]` lines and `dry run: nothing was written`, makes no downloader call (`readDownloads`), and leaves the sandbox HOME snapshot unchanged; `--dry-run --with-mcp` names `opencode` only; `--dry-run --with-mcp=claude,codex` names both; `--dry-run --with-mcp=all` names all six.
 
-Do not write `install.sh`: run your tests through `installerPath("sh")`, which builds a fresh bundle. RED: `timeout 120 bun test --timeout 30000 tests/install-cli.test.mjs` exits 1. GREEN: that file plus `tests/install.test.mjs` exit 0 (17 pass); `bash -n` on every part exits 0.
+Do not write `install.sh`: run your tests through `installerPath("sh")`, which builds a fresh bundle. RED: `timeout 120 bun test --timeout 30000 tests/install-cli.test.mjs` exits 1. GREEN: that file plus `tests/install.test.mjs` exit 0 (14 pass); `bash -n` on every part exits 0.
