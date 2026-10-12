@@ -642,8 +642,8 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] T24 real-asset run
   - [ ] T25 full local verification
   - [ ] Review wave 1 (after W4): independent read-only review of the Linux parts; every P0/P1 fixed or recorded. Findings in `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/review-wave-1.md`.
-  - [ ] C11b MCP scope-safe removal (fixes A3, A4, A6)
-  - [ ] C12b safe startup-file rewrites and keeps (fixes A1, A7 to A10)
+  - [x] C11b MCP scope-safe removal (fixes A3, A4, A6). Evidence: nappy RED 7 fail on HEAD's `mcp.sh` (it removed four harnesses without `--with-mcp` and a hidden user-scope entry), GREEN 33 pass; real `claude mcp get` output shape recorded read-only; parent fixed one lifecycle stub to print a `Scope:` line; parent bundle 85 pass across seven suites; commit `bb4ead7`.
+  - [x] C12b safe startup-file rewrites and keeps (fixes A1, A7 to A10). Evidence: chef reproduced the P0 on HEAD (`.profile` and `.bashrc` 2224 to 0 bytes, `[REMOVED]`, exit 0), RED 8 fail, GREEN 84 pass; same repro on the fix: user content byte-identical, no temp or backup files left; parent bundle 164 pass across eleven Linux suites, shellcheck exit 0, no drift; commit `d09d57f`.
   - [ ] C06b archive and fetch hardening (fixes B1 to B7, B9)
   - [ ] C16b ps1 MCP scope-safe removal (A3, A4 parity with C11b)
   - [ ] Review wave 2 (after W6): independent read-only review of the Windows parts and the manifests.
