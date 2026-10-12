@@ -79,16 +79,17 @@ rewrite_from() {
 dirs_record_present() {
   [[ -e "${install_dir}/.snipset-dirs" || -L "${install_dir}/.snipset-dirs" ]]
 }
-# Adds each PATH not yet listed to the install dir's .snipset-dirs record. The old lines
+# Adds each PATH not yet listed to the record REC (LABEL names it in reports). The old lines
 # are kept, and the new record replaces the file with mv -T, so a symlink there (even one to a
 # directory) is not followed and a real directory makes mv fail.
-dirs_record_add() {
-  local rec="${install_dir}/.snipset-dirs" old="" text path new=""
+record_add() {
+  local label="$1" rec="$2" old="" text path new=""
+  shift 2
   if [[ -f "$rec" && ! -L "$rec" ]]; then
     # Without the x, an unreadable record would read as empty and lose its lines.
     old="$(cat -- "$rec" 2>/dev/null && printf x)" || old=""
     if [[ "$old" != *x ]]; then
-      report FAIL 'dirs record' "${rec} could not be read"
+      report FAIL "$label" "${rec} could not be read"
       return 0
     fi
     old="${old%x}"
@@ -101,13 +102,44 @@ dirs_record_add() {
     [[ $'\n'"$text" != *$'\n'"$path"$'\n'* ]] || continue
     text+="${path}"$'\n'
   done
-  # An empty record still marks an install made by this installer.
+  # An empty dirs record still marks an install made by this installer.
   [[ "$text" != "$old" || -L "$rec" || ! -e "$rec" ]] || return 0
   if new="$(mktemp "${rec}.XXXXXX" 2>/dev/null)" && printf '%s' "$text" > "$new" && mv -fT -- "$new" "$rec"; then
     return 0
   fi
   [[ -z "$new" ]] || rm -f -- "$new"
-  report FAIL 'dirs record' "${rec} could not be written"
+  report FAIL "$label" "${rec} could not be written"
+}
+dirs_record_add() {
+  record_add 'dirs record' "${install_dir}/.snipset-dirs" "$@"
+}
+# Reads the record REC into record_text, then deletes it. Returns 1, deleting nothing, when
+# there is no record, when it is a symlink (left in place), or when it could not be read.
+record_take() {
+  local label="$1" rec="$2"
+  record_text=""
+  if [[ -L "$rec" ]]; then
+    report KEEP "$label" "${rec} symlink left in place"
+    return 1
+  fi
+  [[ -f "$rec" ]] || return 1
+  record_text="$(cat -- "$rec" 2>/dev/null && printf x)" || record_text=""
+  if [[ "$record_text" != *x ]]; then
+    report FAIL "$label" "${rec} could not be read"
+    return 1
+  fi
+  record_text="${record_text%x}"
+  rm -f -- "$rec"
+}
+# touch FILE, then records it in .snipset-files when this call created it, so --uninstall
+# can remove it once the installer's lines are gone. A symlink there is the user's, even dangling.
+touch_recorded() {
+  if [[ -e "$1" || -L "$1" ]]; then
+    touch -- "$1"
+    return
+  fi
+  touch -- "$1" || return 1
+  record_add 'files record' "${install_dir}/.snipset-files" "$1"
 }
 # mkdir -p DIR, then records each directory it created, so --uninstall can remove
 # exactly those (when empty) and never one the user already had.
@@ -557,7 +589,7 @@ pathenv_line_add() {
   local line
   line="$(pathenv_source_line)"
   mkdir_recorded "${1%/*}"
-  touch "$1"
+  touch_recorded "$1"
   grep -Fqx -- "$line" "$1" || printf '\n%s\n' "$line" >> "$1"
 }
 # Drops each exact line and the blank line written just before it, rewriting in place to keep symlinks.
@@ -820,7 +852,7 @@ shell_block_add() {
       report SKIP 'shell block' "${bashrc} left unchanged; not written by the installer in ${share_dir}: ${shell_kept[*]}"
       return 0
     fi
-    touch "$bashrc"
+    touch_recorded "$bashrc"
     if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
       {
         printf '\n'
@@ -1553,18 +1585,8 @@ dirs_candidates() {
 # Runs last: removes, deepest first, each recorded directory that the current flags
 # could have created, that is a real directory, and that rmdir finds empty.
 dirs_remove() {
-  local rec="${install_dir}/.snipset-dirs" text cands path
-  if [[ -L "$rec" ]]; then
-    report KEEP 'dirs record' "${rec} symlink left in place"
-    return 0
-  fi
-  [[ -f "$rec" ]] || return 0
-  text="$(cat -- "$rec" 2>/dev/null && printf x)" || text=""
-  if [[ "$text" != *x ]]; then
-    report FAIL 'dirs record' "${rec} could not be read"
-    return 0
-  fi
-  rm -f -- "$rec"
+  local cands path
+  record_take 'dirs record' "${install_dir}/.snipset-dirs" || return 0
   cands=$'\n'"$(dirs_candidates)"$'\n'
   while IFS= read -r path; do
     [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
@@ -1574,7 +1596,34 @@ dirs_remove() {
     if rmdir -- "$path" 2>/dev/null; then
       report REMOVED dir "$path"
     fi
-  done < <(printf '%s' "${text%x}" | awk '{ print length($0) "\t" $0 }' | sort -k1,1nr | cut -f2-)
+  done < <(printf '%s' "$record_text" | awk '{ print length($0) "\t" $0 }' | sort -k1,1nr | cut -f2-)
+}
+# Prints, one per line, every startup file an install with the current flags may create,
+# using the same expressions as the touch_recorded call sites.
+files_candidates() {
+  pathenv_collect_bash
+  printf '%s\n' "$bashrc" "${HOME}/.profile" "${pathenv_bash[@]}" "$(pathenv_zshenv)"
+}
+# Runs after the shell block and path lines are gone, and before dirs_remove: removes each
+# recorded startup file that the current flags could have created, that is a regular file,
+# and that now holds only whitespace. Any other byte is the user's, so that file stays.
+files_remove() {
+  local cands path rc
+  record_take 'files record' "${install_dir}/.snipset-files" || return 0
+  cands=$'\n'"$(files_candidates)"$'\n'
+  while IFS= read -r path; do
+    [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
+    [[ -f "$path" && ! -L "$path" ]] || continue
+    # In the C locale every byte but ASCII whitespace matches, NUL and invalid UTF-8 included.
+    rc=0
+    LC_ALL=C grep -q -e '[^[:space:]]' -- "$path" 2>/dev/null || rc=$?
+    ((rc == 1)) || continue
+    if rm -f -- "$path" 2>/dev/null && [[ ! -e "$path" ]]; then
+      report REMOVED 'startup file' "$path"
+    else
+      report FAIL 'startup file' "${path} could not be removed"
+    fi
+  done <<< "$record_text"
 }
 do_uninstall() {
   # The remove functions delete for real, so there is nothing safe to preview.
@@ -1587,6 +1636,7 @@ do_uninstall() {
   shell_remove
   pathenv_remove
   binary_remove
+  files_remove
   dirs_remove
   printf 'uninstall: removed %d, kept %d\n' "$n_removed" "$n_kept"
   ((n_fail == 0)) || exit 1

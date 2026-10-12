@@ -176,18 +176,8 @@ dirs_candidates() {
 # Runs last: removes, deepest first, each recorded directory that the current flags
 # could have created, that is a real directory, and that rmdir finds empty.
 dirs_remove() {
-  local rec="${install_dir}/.snipset-dirs" text cands path
-  if [[ -L "$rec" ]]; then
-    report KEEP 'dirs record' "${rec} symlink left in place"
-    return 0
-  fi
-  [[ -f "$rec" ]] || return 0
-  text="$(cat -- "$rec" 2>/dev/null && printf x)" || text=""
-  if [[ "$text" != *x ]]; then
-    report FAIL 'dirs record' "${rec} could not be read"
-    return 0
-  fi
-  rm -f -- "$rec"
+  local cands path
+  record_take 'dirs record' "${install_dir}/.snipset-dirs" || return 0
   cands=$'\n'"$(dirs_candidates)"$'\n'
   while IFS= read -r path; do
     [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
@@ -197,7 +187,34 @@ dirs_remove() {
     if rmdir -- "$path" 2>/dev/null; then
       report REMOVED dir "$path"
     fi
-  done < <(printf '%s' "${text%x}" | awk '{ print length($0) "\t" $0 }' | sort -k1,1nr | cut -f2-)
+  done < <(printf '%s' "$record_text" | awk '{ print length($0) "\t" $0 }' | sort -k1,1nr | cut -f2-)
+}
+# Prints, one per line, every startup file an install with the current flags may create,
+# using the same expressions as the touch_recorded call sites.
+files_candidates() {
+  pathenv_collect_bash
+  printf '%s\n' "$bashrc" "${HOME}/.profile" "${pathenv_bash[@]}" "$(pathenv_zshenv)"
+}
+# Runs after the shell block and path lines are gone, and before dirs_remove: removes each
+# recorded startup file that the current flags could have created, that is a regular file,
+# and that now holds only whitespace. Any other byte is the user's, so that file stays.
+files_remove() {
+  local cands path rc
+  record_take 'files record' "${install_dir}/.snipset-files" || return 0
+  cands=$'\n'"$(files_candidates)"$'\n'
+  while IFS= read -r path; do
+    [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
+    [[ -f "$path" && ! -L "$path" ]] || continue
+    # In the C locale every byte but ASCII whitespace matches, NUL and invalid UTF-8 included.
+    rc=0
+    LC_ALL=C grep -q -e '[^[:space:]]' -- "$path" 2>/dev/null || rc=$?
+    ((rc == 1)) || continue
+    if rm -f -- "$path" 2>/dev/null && [[ ! -e "$path" ]]; then
+      report REMOVED 'startup file' "$path"
+    else
+      report FAIL 'startup file' "${path} could not be removed"
+    fi
+  done <<< "$record_text"
 }
 do_uninstall() {
   # The remove functions delete for real, so there is nothing safe to preview.
@@ -210,6 +227,7 @@ do_uninstall() {
   shell_remove
   pathenv_remove
   binary_remove
+  files_remove
   dirs_remove
   printf 'uninstall: removed %d, kept %d\n' "$n_removed" "$n_kept"
   ((n_fail == 0)) || exit 1

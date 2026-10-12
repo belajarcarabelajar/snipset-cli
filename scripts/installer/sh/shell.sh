@@ -100,7 +100,7 @@ shell_block_add() {
       report SKIP 'shell block' "${bashrc} left unchanged; not written by the installer in ${share_dir}: ${shell_kept[*]}"
       return 0
     fi
-    touch "$bashrc"
+    touch_recorded "$bashrc"
     if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
       {
         printf '\n'

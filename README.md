@@ -95,6 +95,7 @@ Rules:
 - The database is never removed.
 - Uninstall removes the directories the install created, deepest first, when they are empty. The install records them in `<install-dir>/.snipset-dirs`. A directory that existed before the install, or that still holds a file, stays, except the default share dir an older install left (next rule). Other directories made by an installer older than this record are not in it and can stay behind empty.
 - The installer tracks the shell files it writes in `<share-dir>/.snipset-bundle`. A `snipset.sh`, `completion.bash`, or `tab.sh` there that it did not write, or that you edited, is kept: install and uninstall print `[KEEP]`, and the bashrc block is not added while one is kept, because it would source that file at every login. Delete the file to let the installer manage it again.
+- A startup file the installer created, such as a `--bashrc` path or `~/.profile` that did not exist, is listed in `<install-dir>/.snipset-files`; uninstall removes it once only blank lines are left. A startup file you already had stays, even if it ends up empty.
 - Installs older than the manifest: a default share dir (`~/.local/share/snipset`) with no `.snipset-bundle` is taken as an older install, so its `snipset.sh`, `completion.bash`, and `tab.sh` are replaced as before, and uninstall removes the directory once it is empty. Keep files of your own under those names in a custom `--share-dir`.
 
 ```sh

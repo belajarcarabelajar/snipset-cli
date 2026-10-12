@@ -124,6 +124,8 @@ test("uninstall keeps a last user line that has no final newline", async () => {
 
 test("uninstall of a bashrc holding only the block leaves it empty", async () => {
   const { sb, bashrc } = setup();
+  // A .bashrc the user already had; one the installer created is removed (tests/install-startup-files.test.mjs).
+  writeFileSync(bashrc, "");
   await install(sb);
   const res = await runInstaller(sb, [...FLAGS, "--uninstall"]);
   assert.equal(res.code, 0, `${res.stdout}\n${res.stderr}`);

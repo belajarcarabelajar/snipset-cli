@@ -48,7 +48,7 @@ pathenv_line_add() {
   local line
   line="$(pathenv_source_line)"
   mkdir_recorded "${1%/*}"
-  touch "$1"
+  touch_recorded "$1"
   grep -Fqx -- "$line" "$1" || printf '\n%s\n' "$line" >> "$1"
 }
 # Drops each exact line and the blank line written just before it, rewriting in place to keep symlinks.
