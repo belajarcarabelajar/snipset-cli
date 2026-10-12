@@ -1,0 +1,21 @@
+# Maintainer: Iwan Kurniawan <iwan@snipset.belajarcarabelajar.com>
+pkgname=snipset-cli
+pkgver={{version}}
+pkgrel=1
+pkgdesc='Command-line and MCP server interface for Snipset snippets'
+arch=('x86_64')
+url='https://snipset.belajarcarabelajar.com'
+license=('LicenseRef-Snipset-EULA')
+depends=('glibc' 'gcc-libs' 'openssl' 'zlib' 'brotli' 'zstd')
+options=('!strip' '!debug')
+source_x86_64=("snipset-cli-$pkgver-x86_64.tar.gz::https://github.com/belajarcarabelajar/snipset-cli/releases/download/v$pkgver/snipset-cli-v$pkgver-x86_64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('{{sha256.linux}}')
+
+package() {
+  cd "$srcdir"
+  install -Dm755 snipset "$pkgdir/usr/bin/snipset"
+  install -Dm755 shell/snipset-shims.sh "$pkgdir/usr/bin/snipset-shims"
+  install -Dm644 shell/completion.bash "$pkgdir/usr/share/bash-completion/completions/snipset.bash"
+  install -Dm644 -t "$pkgdir/usr/share/snipset-cli" shell/snipset.sh shell/tab.sh
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
