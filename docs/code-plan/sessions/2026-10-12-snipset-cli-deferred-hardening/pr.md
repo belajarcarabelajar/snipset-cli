@@ -43,18 +43,18 @@ Eight items deferred by PR #6, plus one new Windows finding.
 
 ## 4. Local Verification Evidence
 
-Every row ran at `70bc688` on the machine holding the working tree, before the branch was pushed. PowerShell ran with `POWERSHELL_TELEMETRY_OPTOUT=1`.
+Every row ran at `e9e5f13` (after the review fixes and the debt-sweep follow-up S2) on the machine holding the working tree, before those commits were pushed. PowerShell ran with `POWERSHELL_TELEMETRY_OPTOUT=1`.
 
 | Gate | Command | Exit | Result |
 |---|---|---|---|
-| Plan runner | `SNIPSET_REAL_ASSETS=<dir> ultra-plan-runner.mjs <plan> --execute` (mirror current) | 0 | T01 to T08 SKIPPED-IDEMPOTENT by their own tests, T09 NEEDS-AGENT (the review below), T10 PASSED, empty error ledger |
-| Full suite | `bun test --timeout 60000 tests/` | 0 | 581 pass, 6 skip, 0 fail |
-| Without `snipset` and `pwsh` | `env PATH="$HOME/.bun/bin:/usr/bin:/bin" bun test --timeout 60000 tests/` | 0 | 430 pass, 157 skip, 0 fail |
+| Plan runner | `SNIPSET_REAL_ASSETS=<dir> ultra-plan-runner.mjs <plan> --execute` (mirror current) | 0 | T01 to T08 and F01 SKIPPED-IDEMPOTENT by their own tests, T09 NEEDS-AGENT (the review below), T10 PASSED, empty error ledger |
+| Full suite | `bun test --timeout 60000 tests/` | 0 | 590 pass, 6 skip, 0 fail |
+| Without `snipset` and `pwsh` | `env PATH="$HOME/.bun/bin:/usr/bin:/bin" bun test --timeout 60000 tests/` | 0 | 439 pass, 157 skip, 0 fail |
 | Real assets | `SNIPSET_REAL_ASSETS=<dir> bun test tests/install-real-assets.test.mjs` | 0 | 4 pass |
 | Drift | `bun scripts/installer/build.mjs --check`, `bun scripts/packaging/render.mjs --check` | 0 | clean |
 | Shell lint | `shellcheck -S warning` on `install.sh`, `scripts/snipset-live.sh`, every part; the PKGBUILD with `--shell=bash --exclude=SC2034,SC2154,SC2164` | 0 | 0 warnings |
 | PowerShell contract | `pwsh -NoProfile -File tests/install.Tests.ps1` | 0 | passed |
-| Copy rules | em dash scan of 27 changed files, attribution scan of 13 commit messages | 0 | 0 hits |
+| Copy rules | em dash scan of 30 changed files, attribution scan of 17 commit messages | 0 | 0 hits |
 
 Every task started from a failing test (RED recorded in the plan checklist); guards on existing behaviour were proven by mutations.
 
