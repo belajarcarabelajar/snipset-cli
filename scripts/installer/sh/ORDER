@@ -1,0 +1,12 @@
+lib.sh
+args.sh
+platform.sh
+fetch.sh
+binary.sh
+pathenv.sh
+shell.sh
+db.sh
+shims.sh
+mcp.sh
+modes.sh
+main.sh

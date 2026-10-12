@@ -4,15 +4,13 @@ import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, chmod, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { installerPath } from "./helpers/install-sandbox.mjs";
 
 const run = promisify(execFile);
-const testDir = dirname(fileURLToPath(import.meta.url));
-const root = existsSync(join(testDir, "..", "install.sh")) ? join(testDir, "..") : process.cwd();
-const script = join(root, "install.sh");
+const script = installerPath("sh");
 
 const STUB_SNIPSET = `#!/bin/sh
 db="$HOME/.local/share/Snipset/snipset.db"
