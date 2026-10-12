@@ -331,7 +331,7 @@ Rules for every chunk (carried from the install-coverage contracts and `MEMORY.m
 - [x] T01 helper v2 and R4. Evidence: RED `-t 'helper v2:'` exit 1 (matched 0, then 0 pass 8 fail with options ignored and `runInstallerPiped`/`linkTools` not functions); GREEN sandbox suite 36 pass, platform suite 23 pass with identical sorted names (junit), smoke of install, shell, mcp, ps1-mcp suites 82 pass; `useStarMarker` gone; helper 447 lines.
 - [ ] T02 L1 share-dir manifest
 - [ ] T03 L2 created-dirs record
-- [ ] T04 L3 stdin pipe test
+- [x] T04 L3 stdin pipe test. Evidence: `tests/install-stdin.test.mjs` 3 pass against a HEAD-only bundle (equal to the committed `install.sh`): install makes 7 harness calls and uninstall 5 (three `remove` through `mcp_run`, stateful stubs from `tests/helpers/mcp-stubs.mjs`), each reading 0 bytes, stdout ending `AFTER-SENTINEL`. Positive controls: a HEAD bundle without the `mcp_run` redirect loses the 26-byte trailer to `claude mcp add` (install) and to `claude mcp remove` (uninstall); with the mutation turned off each control fails (`mcp_run kept its redirect`, `the mutated bundle kept the sentinel`).
 - [x] T05 L4 legacy env scrub. Evidence: RED `-t 'legacy env is scrubbed'` exit 1 (13 caller PATH entries leaked, `~/.local/bin` twice); GREEN `tests/install.test.mjs` exit 0, 15 pass (the 14 names unchanged, sorted diff adds only the new one). Parent integration added `getconf`, `ldd`, `timeout` to the linked tools so the legacy tests keep the normal glibc check and the bounded smoke run (the chunk's default set took the fallback path).
 - [ ] T06 L7 `-Db`
 - [ ] T07 L10 old-exe cleanup and W1 DLL message
