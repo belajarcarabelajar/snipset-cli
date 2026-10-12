@@ -28,10 +28,29 @@ function Get-SnipsetInstalledVersion {
   if ($LASTEXITCODE -eq 0 -and ($out -join "`n") -match '^snipset v?(\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?)') { return $Matches[1] }
   $null
 }
+function Move-SnipsetExe {
+  param([string]$Candidate, [string]$Exe)
+  # Windows refuses to overwrite a running exe but lets it be renamed, so a busy one is moved aside first.
+  # Returns 'moved', 'in-use', or the path the old exe was moved to.
+  try {
+    Move-Item -LiteralPath $Candidate -Destination $Exe -Force
+    return 'moved'
+  } catch [IO.IOException], [UnauthorizedAccessException] { }
+  $aside = "$Exe.old-$PID"
+  try { Move-Item -LiteralPath $Exe -Destination $aside -Force } catch [IO.IOException], [UnauthorizedAccessException] { return 'in-use' }
+  try {
+    Move-Item -LiteralPath $Candidate -Destination $Exe -Force
+  } catch [IO.IOException], [UnauthorizedAccessException] {
+    Move-Item -LiteralPath $aside -Destination $Exe -Force
+    return 'in-use'
+  }
+  $aside
+}
 function Install-SnipsetBinary {
   param([string]$Zip, [string]$Stage, [string]$InstallDir)
-  New-Item -ItemType Directory -Force -Path $stage | Out-Null
-  Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+  [void][IO.Directory]::CreateDirectory($InstallDir)
+  # Expand-Archive tests an existing destination as a wildcard, so with a [ in the path it must create the stage itself.
+  Expand-Archive -LiteralPath $Zip -DestinationPath $Stage -Force
   $candidate = Join-Path $stage 'snipset.exe'
   if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'install.ps1: archive has no snipset.exe' }
   $windows = Test-SnipsetWindowsHost
@@ -40,9 +59,17 @@ function Install-SnipsetBinary {
   } else {
     Write-SnipsetReport -Status SKIP -Item 'smoke' -Detail 'not a Windows host'
   }
-  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
   $exe = Join-Path $InstallDir 'snipset.exe'
-  Move-Item -LiteralPath $candidate -Destination $exe -Force
+  if ($windows) {
+    $moved = Move-SnipsetExe -Candidate $candidate -Exe $exe
+    if ($moved -eq 'in-use') {
+      Write-SnipsetReport -Status FAIL -Item 'binary' -Detail 'in use (close the program using it)'
+      return
+    }
+    if ($moved -ne 'moved') { Write-SnipsetReport -Status NOTE -Item 'binary' -Detail "$exe was in use; the old one is now $moved, delete it once that program exits" }
+  } else {
+    Move-Item -LiteralPath $candidate -Destination $exe -Force
+  }
   if ($windows) {
     # Mark of the Web on the zip may or may not reach the extracted exe; Unblock-File is a no-op when absent.
     Unblock-File -LiteralPath $exe

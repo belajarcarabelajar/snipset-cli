@@ -61,11 +61,29 @@ param(
   [switch]$Update,
   [switch]$Uninstall
 )
+# The one-liner runs inside the caller's session, whose strict mode would otherwise reach every part.
+Set-StrictMode -Off
 $ErrorActionPreference = 'Stop'
-# Win PS 5.1 defaults to TLS 1.0; GitHub requires TLS 1.2 since 2018-02-01.
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Windows PowerShell 5.1 redraws a progress bar per downloaded chunk, which slows Invoke-WebRequest many times over.
+$ProgressPreference = 'SilentlyContinue'
 $repo = 'belajarcarabelajar/snipset-cli'
 $baseUrl = if ($env:SNIPSET_RELEASE_BASE_URL) { $env:SNIPSET_RELEASE_BASE_URL } else { "https://github.com/$repo/releases/download" }
+
+function Enable-SnipsetTls12 {
+  param([string]$Edition = $PSVersionTable.PSEdition)
+  # Windows PowerShell may offer only TLS 1.0 while GitHub requires TLS 1.2 since 2018-02-01; pwsh (Core) negotiates
+  # it already. The setting is process-wide, so the previous value is returned for Restore-SnipsetTls.
+  if ($Edition -eq 'Core') { return $null }
+  $previous = [Net.ServicePointManager]::SecurityProtocol
+  if ($previous -band [Net.SecurityProtocolType]::Tls12) { return $null }
+  [Net.ServicePointManager]::SecurityProtocol = $previous -bor [Net.SecurityProtocolType]::Tls12
+  $previous
+}
+
+function Restore-SnipsetTls {
+  param($Previous)
+  if ($null -ne $Previous) { [Net.ServicePointManager]::SecurityProtocol = $Previous }
+}
 
 function Write-SnipsetReport {
   param([string]$Status, [string]$Item, [string]$Detail)
@@ -110,9 +128,18 @@ function Resolve-SnipsetMcpIds {
 
 function Resolve-SnipsetInstallDir {
   param([string]$InstallDir)
-  if ($InstallDir) { return $InstallDir }
-  if (-not $env:LOCALAPPDATA) { throw 'install.ps1: LOCALAPPDATA is not set; pass -InstallDir <dir>' }
-  Join-Path $env:LOCALAPPDATA 'Snipset\bin'
+  if (-not $InstallDir) {
+    if (-not $env:LOCALAPPDATA) { throw 'install.ps1: LOCALAPPDATA is not set; pass -InstallDir <dir>' }
+    $InstallDir = Join-Path $env:LOCALAPPDATA 'Snipset\bin'
+  }
+  # PATH splits entries at ; and a " changes how the entry is quoted, so either would point PATH somewhere else.
+  $refusal = "install.ps1: the install directory must not contain ; or `" (got $InstallDir)"
+  if ($InstallDir -match '[;"]') { throw $refusal }
+  # [IO.Path] alone resolves against the process directory, which Set-Location does not move.
+  $here = (Get-Location -PSProvider FileSystem).ProviderPath
+  $full = [IO.Path]::GetFullPath([IO.Path]::Combine($here, $InstallDir))
+  if ($full -match '[;"]') { throw $refusal }
+  $full
 }
 $target = 'x86_64-pc-windows-msvc'
 
@@ -186,13 +213,16 @@ function Get-SnipsetRelease {
       Copy-Item -LiteralPath $source -Destination (Join-Path $temp $name)
     }
   } else {
+    # A loopback http URL is a local mirror or a test server, so nothing crosses the network unencrypted.
+    $loopback = $baseUrl -match '^http://(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?(/|$)'
+    if ($baseUrl -notlike 'https://*' -and -not $loopback) { throw "install.ps1: SNIPSET_RELEASE_BASE_URL must start with https:// (got $baseUrl); use -From <dir> for local files" }
     Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/SHA256SUMS" -OutFile $sums
     Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/$archive" -OutFile $zip
   }
-  $line = Get-Content $sums | Where-Object { $_ -match "\s$([regex]::Escape($archive))$" } | Select-Object -First 1
+  $line = Get-Content -LiteralPath $sums | Where-Object { $_ -match "\s$([regex]::Escape($archive))$" } | Select-Object -First 1
   if (-not $line -or $line -notmatch '^([0-9a-fA-F]{64})\s+') { throw 'install.ps1: checksum entry missing' }
   $expected = $Matches[1].ToLowerInvariant()
-  $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+  $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
   if ($actual -ne $expected) { throw 'install.ps1: checksum mismatch' }
   $zip
 }
@@ -226,10 +256,29 @@ function Get-SnipsetInstalledVersion {
   if ($LASTEXITCODE -eq 0 -and ($out -join "`n") -match '^snipset v?(\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?)') { return $Matches[1] }
   $null
 }
+function Move-SnipsetExe {
+  param([string]$Candidate, [string]$Exe)
+  # Windows refuses to overwrite a running exe but lets it be renamed, so a busy one is moved aside first.
+  # Returns 'moved', 'in-use', or the path the old exe was moved to.
+  try {
+    Move-Item -LiteralPath $Candidate -Destination $Exe -Force
+    return 'moved'
+  } catch [IO.IOException], [UnauthorizedAccessException] { }
+  $aside = "$Exe.old-$PID"
+  try { Move-Item -LiteralPath $Exe -Destination $aside -Force } catch [IO.IOException], [UnauthorizedAccessException] { return 'in-use' }
+  try {
+    Move-Item -LiteralPath $Candidate -Destination $Exe -Force
+  } catch [IO.IOException], [UnauthorizedAccessException] {
+    Move-Item -LiteralPath $aside -Destination $Exe -Force
+    return 'in-use'
+  }
+  $aside
+}
 function Install-SnipsetBinary {
   param([string]$Zip, [string]$Stage, [string]$InstallDir)
-  New-Item -ItemType Directory -Force -Path $stage | Out-Null
-  Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+  [void][IO.Directory]::CreateDirectory($InstallDir)
+  # Expand-Archive tests an existing destination as a wildcard, so with a [ in the path it must create the stage itself.
+  Expand-Archive -LiteralPath $Zip -DestinationPath $Stage -Force
   $candidate = Join-Path $stage 'snipset.exe'
   if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'install.ps1: archive has no snipset.exe' }
   $windows = Test-SnipsetWindowsHost
@@ -238,9 +287,17 @@ function Install-SnipsetBinary {
   } else {
     Write-SnipsetReport -Status SKIP -Item 'smoke' -Detail 'not a Windows host'
   }
-  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
   $exe = Join-Path $InstallDir 'snipset.exe'
-  Move-Item -LiteralPath $candidate -Destination $exe -Force
+  if ($windows) {
+    $moved = Move-SnipsetExe -Candidate $candidate -Exe $exe
+    if ($moved -eq 'in-use') {
+      Write-SnipsetReport -Status FAIL -Item 'binary' -Detail 'in use (close the program using it)'
+      return
+    }
+    if ($moved -ne 'moved') { Write-SnipsetReport -Status NOTE -Item 'binary' -Detail "$exe was in use; the old one is now $moved, delete it once that program exits" }
+  } else {
+    Move-Item -LiteralPath $candidate -Destination $exe -Force
+  }
   if ($windows) {
     # Mark of the Web on the zip may or may not reach the extracted exe; Unblock-File is a no-op when absent.
     Unblock-File -LiteralPath $exe
@@ -799,9 +856,14 @@ $mode = Get-SnipsetMode -Check:$Check -Update:$Update -Uninstall:$Uninstall
 $mcpIds = Resolve-SnipsetMcpIds -WithMcp $WithMcp
 $InstallDir = Resolve-SnipsetInstallDir -InstallDir $InstallDir
 Assert-SnipsetPlatform
-switch ($mode) {
-  'check' { Invoke-SnipsetCheck -McpIds $mcpIds }
-  'update' { Invoke-SnipsetUpdate -McpIds $mcpIds }
-  'uninstall' { Invoke-SnipsetUninstall -McpIds $mcpIds }
-  default { Invoke-SnipsetInstall -McpIds $mcpIds }
+$previousTls = Enable-SnipsetTls12
+try {
+  switch ($mode) {
+    'check' { Invoke-SnipsetCheck -McpIds $mcpIds }
+    'update' { Invoke-SnipsetUpdate -McpIds $mcpIds }
+    'uninstall' { Invoke-SnipsetUninstall -McpIds $mcpIds }
+    default { Invoke-SnipsetInstall -McpIds $mcpIds }
+  }
+} finally {
+  Restore-SnipsetTls -Previous $previousTls
 }

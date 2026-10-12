@@ -26,13 +26,16 @@ function Get-SnipsetRelease {
       Copy-Item -LiteralPath $source -Destination (Join-Path $temp $name)
     }
   } else {
+    # A loopback http URL is a local mirror or a test server, so nothing crosses the network unencrypted.
+    $loopback = $baseUrl -match '^http://(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?(/|$)'
+    if ($baseUrl -notlike 'https://*' -and -not $loopback) { throw "install.ps1: SNIPSET_RELEASE_BASE_URL must start with https:// (got $baseUrl); use -From <dir> for local files" }
     Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/SHA256SUMS" -OutFile $sums
     Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/$archive" -OutFile $zip
   }
-  $line = Get-Content $sums | Where-Object { $_ -match "\s$([regex]::Escape($archive))$" } | Select-Object -First 1
+  $line = Get-Content -LiteralPath $sums | Where-Object { $_ -match "\s$([regex]::Escape($archive))$" } | Select-Object -First 1
   if (-not $line -or $line -notmatch '^([0-9a-fA-F]{64})\s+') { throw 'install.ps1: checksum entry missing' }
   $expected = $Matches[1].ToLowerInvariant()
-  $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+  $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
   if ($actual -ne $expected) { throw 'install.ps1: checksum mismatch' }
   $zip
 }
