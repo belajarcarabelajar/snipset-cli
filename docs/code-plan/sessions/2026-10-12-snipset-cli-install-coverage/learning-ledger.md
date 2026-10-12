@@ -18,6 +18,10 @@
 | 5 | `rule-miss` | Sent the "uninstall uses the `--with-mcp` list" amendment to C12 while its first run was finishing | The first report still printed "scans all six" in the help text | one resumed run | Amend a running chunk only through `SendMessage` and wait for the second report before integrating |
 | 6 | `tool-misfire` | Planned the T25 attribution scan as `rg -i "co-authored-by|generated with|claude code"` | The scan flagged a commit body that lists Claude Code as an MCP harness | 1 plan edit | Scan for credit-line shapes (`Co-Authored-By`, `Generated with`, the robot emoji), not product names that are content here |
 | 7 | `rule-miss` | Accepted unit-level green for the uninstall paths before an adversarial review | Review wave 1 reproduced a P0 (a failed `mktemp` emptied `.profile` and `.bashrc`), review wave 3 a P1 (a user's own fish file overwritten then deleted) | four fix chunks | For code that deletes or rewrites user files, run an adversarial removal review with reproductions before the PR |
+| 8 | `rule-miss` | After the follow-up commits, ran `ultra-plan-runner.mjs --execute ...; echo "runner rc=$?"` as a background task | The task reported exit 0; the log said `MIRROR GATE: BLOCKED` (mirror hash differed after the plan edits) and nothing had run | one wasted run and a false green signal | Publish the plan (`plan-publish.mjs`) before the runner, and keep the runner's own exit code (`rc=$?; ...; exit $rc`), per global rule A2 |
+| 9 | `tool-misfire` | Retyped the PKGBUILD lint as `shellcheck -S warning -s bash PKGBUILD` | exit 1 with eleven SC2034, SC2154, SC2164 notes that the real gate excludes | 1 call | Copy a gate's command from the plan's `run[]` or its test (`tests/packaging-aur.test.mjs:130`), never retype it |
+| 10 | `rule-miss` | Reran the runner without `SNIPSET_REAL_ASSETS`, which the passing run had set | T24 `FAILED-BLOCKING` exit 127 (`SNIPSET_REAL_ASSETS: set SNIPSET_REAL_ASSETS`), classified `environment`; T23 and T25 halted | one runner run | Rerun the runner with the environment the plan's own evidence line records for the last passing run |
+| 11 | `premature-guess` | The debt sweep said `tests/install-ps1-mcp.test.mjs` was 503 lines, copied from a reviewer report | The F04 chunk measured 538 before its change | none (the finish line was "under 500") | Measure a count in the step that writes it (rule 7, NO-OP) |
 
 Confirmed approaches (kept because they worked, not because they failed):
 
@@ -46,12 +50,14 @@ Facts measured this session that belong to the machine, not to this repository:
 | 6 | WHEN scanning commits for attribution in this repository → DO match credit-line shapes (`Co-Authored-By`, `Generated with`, the robot emoji), NOT product names such as Claude Code, which this repository names as an MCP harness | Y | Y | KEEP |
 | 7 | WHEN a plan states a count → DO derive it with a command in the same step | marginal (covered by the verification rule) | Y | NO-OP |
 | 8 | WHEN amending a running chunk → DO wait for its next report before integrating | N (the harness already delivers a second report) | N | NO-OP |
+| 9 | WHEN `ultra-plan-runner.mjs --execute` runs after the plan file changed → DO run `plan-publish.mjs <plan>` first and read the runner's own exit code, NOT trust a wrapper's exit 0 | Y (the gate prints `MIRROR GATE: BLOCKED` and runs nothing) | Y | KEEP |
+| 10 | WHEN rerunning a verification gate by hand → DO copy its command from the plan's `run[]` or its test | marginal (covered by the verification rule) | Y | NO-OP |
 
 ## 4. Promotion Decision
 
 | Item | Destination | Why | Approval |
 |---|---|---|---|
-| Rules 1 to 6 | in-repo `MEMORY.md` (auto) | rules 2, 3, 4, 6 are specific to this repository; 1 and 5 are general but were measured here first | not required |
+| Rules 1 to 6 and 9 | in-repo `MEMORY.md` (auto) | rules 2, 3, 4, 6 are specific to this repository; 1 and 5 are general but were measured here first | not required |
 | F1 (TinyFish six parameters) | `~/AGENTS.md` correction of the "TinyFish fetch_content" block | machine-wide; the global note is now wrong | asked separately (header `Promote`) |
 | F2 (vivera copy-rules root) | `~/AGENTS.md` candidate | applies to every repository that borrows vivera's scripts | asked separately (header `Promote`) |
 | F3 (scratch with rm denied) | none | a property of the current permission setting, recorded in `~/AGENTS.md` already | not required |

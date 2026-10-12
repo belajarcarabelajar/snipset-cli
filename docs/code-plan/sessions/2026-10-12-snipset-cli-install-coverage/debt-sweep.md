@@ -53,4 +53,23 @@
 
 ## 4. Question and Execution Record
 
-Pending (asked after the final recap).
+**Question (2026-10-12, one call, two multi-select groups):** Code: N1, N2, N3; Tests: N4, N5, `Nothing, close session`. **Owner selected:** all five (N1 to N5).
+
+| Item | Plan task | Commit | Evidence |
+|---|---|---|---|
+| N5 | F05 | `d0903a8` | `tests/install-shims.test.mjs` 10 pass; mutation of `shims.sh:38` turns the new test red (`ENOENT lstat .../,k1`) |
+| N2 | F02 | `e36fe8a` | RED 2 fail on HEAD; GREEN on HEAD plus `db.sh`; the real v0.2.0 binary prints `schema mismatch: database already exists: ...; pass --force ...` on a second `init`, and two `install.sh --from` runs over that database print only the installer's note |
+| N1 | F01 | `cbafc75` | RED 4 fail on HEAD; GREEN 63 pass; each guard removed alone reddens only its own test; the real v0.2.0 archive holds six regular files and still installs (4 pass) |
+| N3 | F03 | `84620f2` | RED 3 fail; GREEN 40 pass; pwsh contract passed |
+| N4 | F04 | `f7978a6` | 25 and 25 pass before and after; name lists identical; test bodies hash identical to HEAD; ps1 suite 538 to 425 lines |
+
+## 5. Re-pass (debt created by executing N1 to N5)
+
+| # | Candidate | Class | Decision |
+|---|---|---|---|
+| R1 | `binary.sh` keeps the untested `.-*` pattern next to the new `./-*` (intent unknown) | NO-OP | removing it would loosen a refusal; no release member starts with `.-` |
+| R2 | `install.ps1` matches the archive name case-insensitively (`-match`), `install.sh` exactly | NO-OP | pre-existing, and Windows file names are case-insensitive |
+| R3 | on a successful `init`, the CLI's stderr is now printed after its stdout | NO-OP | ordering only; no consumer parses it |
+| R4 | `tests/install-ps1-platform.test.mjs` rewrites `SHA256SUMS` itself because `fakeWindowsRelease` has no star-marker option | LATER | `defer: a local useStarMarker helper, upgrade-trigger: a second suite needs the marker` |
+
+No new `NOW` item, so no second question.
