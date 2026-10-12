@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
+import { installerPath } from "./helpers/install-sandbox.mjs";
 
 const run = promisify(execFile);
 
@@ -15,7 +16,7 @@ const pwshSkip = Bun.which("pwsh") ? false : "pwsh not on PATH";
 if (pwshSkip) console.warn(`skipping install.ps1 Linux run: ${pwshSkip}`);
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const installScript = fileURLToPath(new URL("../install.ps1", import.meta.url));
+const installScript = installerPath("ps1");
 const version = "v0.1.0";
 const archiveName = `snipset-cli-${version}-x86_64-pc-windows-msvc.zip`;
 // pwsh sends startup telemetry unless this is set before the process starts.
