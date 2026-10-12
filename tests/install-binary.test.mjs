@@ -19,6 +19,8 @@ import {
 
 const OLD_BINARY = "#!/bin/sh\nprintf 'snipset 0.0.9\\n'\n";
 const FOREIGN_BINARY = "#!/bin/sh\nprintf 'other\\n'\n";
+const HEADER_GENERATOR = "#!/bin/sh\n# snipset-shims: generate trigger shims (older install)\n";
+const FOREIGN_GENERATOR = "#!/bin/sh\necho 'my own shim tool'\n";
 
 const cleanups = [];
 afterEach(async () => {
@@ -223,6 +225,7 @@ test("uninstall keeps a snipset-shims file without the managed header", async ()
   const sb = sandbox();
   await installed(sb);
   const generator = join(binDir(sb), "snipset-shims");
+  writeExecutable(generator, FOREIGN_GENERATOR);
   const content = readFileSync(generator, "utf8");
   const result = await runInstaller(sb, ["--uninstall"]);
   assert.ok(lineStarting(result.stdout, "[KEEP] snipset-shims:"), result.stdout);
@@ -245,6 +248,83 @@ test("uninstall skips a binary and generator that are absent", async () => {
   assert.equal(result.code, 0, result.stderr);
   assert.ok(lineStarting(result.stdout, "[SKIP] binary:"), result.stdout);
   assert.ok(lineStarting(result.stdout, "[SKIP] snipset-shims:"), result.stdout);
+});
+
+function refusal(path) {
+  return `install.sh: ${path} exists and is not a snipset install; move it aside or pass --install-dir`;
+}
+
+async function refusedInstall(sb, path, rel = release()) {
+  downloaderShims(sb, rel);
+  const before = snapshotTree(sb.home);
+  const result = await runInstaller(sb, ["--version", rel.version]);
+  assert.equal(result.code, 1, result.stdout + result.stderr);
+  assert.ok(lines(result.stderr).includes(refusal(path)), result.stderr);
+  assert.doesNotMatch(result.stdout, /Installed snipset/);
+  assert.deepEqual(diffSnapshots(before, snapshotTree(sb.home)), []);
+  return result;
+}
+
+test("install refuses a foreign snipset and leaves it untouched", async () => {
+  const sb = sandbox();
+  const foreign = join(binDir(sb), "snipset");
+  writeExecutable(foreign, FOREIGN_BINARY);
+  await refusedInstall(sb, foreign);
+  assert.equal(readFileSync(foreign, "utf8"), FOREIGN_BINARY);
+});
+
+test("install refuses a symlinked snipset and leaves the link and its target untouched", async () => {
+  const sb = sandbox();
+  const real = join(sb.home, "opt", "snipset");
+  writeExecutable(real, OLD_BINARY);
+  mkdirSync(binDir(sb), { recursive: true });
+  const link = join(binDir(sb), "snipset");
+  symlinkSync(real, link);
+  await refusedInstall(sb, link);
+  assert.ok(lstatSync(link).isSymbolicLink(), `${link} was replaced`);
+  assert.equal(readFileSync(real, "utf8"), OLD_BINARY);
+});
+
+test("install refuses a foreign snipset-shims before replacing the older binary", async () => {
+  const sb = sandbox();
+  const bin = join(binDir(sb), "snipset");
+  const gen = join(binDir(sb), "snipset-shims");
+  writeExecutable(bin, OLD_BINARY);
+  writeExecutable(gen, FOREIGN_GENERATOR);
+  await refusedInstall(sb, gen);
+  assert.equal(readFileSync(bin, "utf8"), OLD_BINARY);
+  assert.equal(readFileSync(gen, "utf8"), FOREIGN_GENERATOR);
+});
+
+test("install refuses a symlinked snipset-shims even when its target has the managed header", async () => {
+  const sb = sandbox();
+  const realGen = join(sb.home, "opt", "snipset-shims");
+  writeExecutable(realGen, HEADER_GENERATOR);
+  writeExecutable(join(binDir(sb), "snipset"), OLD_BINARY);
+  const link = join(binDir(sb), "snipset-shims");
+  symlinkSync(realGen, link);
+  await refusedInstall(sb, link);
+  assert.ok(lstatSync(link).isSymbolicLink(), `${link} was replaced`);
+  assert.equal(readFileSync(realGen, "utf8"), HEADER_GENERATOR);
+});
+
+test("install replaces a genuine older snipset and a generator with the managed header", async () => {
+  const sb = sandbox();
+  const bin = join(binDir(sb), "snipset");
+  const gen = join(binDir(sb), "snipset-shims");
+  writeExecutable(bin, OLD_BINARY);
+  writeExecutable(gen, HEADER_GENERATOR);
+  await installed(sb, headerRelease("0.3.0"), ["--no-init", "--no-shims"]);
+  assert.equal(String(execFileSync(bin, ["--version"], { env: sb.env() })), "snipset 0.3.0\n");
+  assert.match(readFileSync(gen, "utf8"), /^#!\/bin\/sh\n# snipset-shims: generate trigger shims \(test fixture\)\n/);
+});
+
+test("a release without the shell bundle installs beside a foreign snipset-shims and leaves it alone", async () => {
+  const sb = sandbox();
+  const gen = join(binDir(sb), "snipset-shims");
+  writeExecutable(gen, FOREIGN_GENERATOR);
+  await installed(sb, release({ withShell: false }), ["--no-init", "--no-shims"]);
+  assert.equal(readFileSync(gen, "utf8"), FOREIGN_GENERATOR);
 });
 
 test("uninstall keeps a symlinked snipset and snipset-shims in place", async () => {
