@@ -1,0 +1,9 @@
+params.ps1
+lib.ps1
+platform.ps1
+fetch.ps1
+binary.ps1
+path.ps1
+mcp.ps1
+modes.ps1
+main.ps1

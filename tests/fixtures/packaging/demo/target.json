@@ -1,0 +1,7 @@
+{
+  "outputs": [
+    { "template": "demo.txt.tmpl", "out": "out/demo/demo.txt" },
+    { "template": "demo.txt.tmpl", "out": "out/demo/{{version}}/demo-{{version}}.txt" }
+  ],
+  "owns": "out/demo"
+}
