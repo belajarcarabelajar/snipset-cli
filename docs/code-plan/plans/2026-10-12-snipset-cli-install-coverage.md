@@ -649,8 +649,8 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] Review wave 2 (after W6): independent read-only review of the Windows parts and the manifests. Findings in `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/review-wave-2.md`.
   - [x] C17b packaging P3 fixes (D1 to D4). Evidence: hoggy RED 5 fail, GREEN 89 pass 2 skip across six packaging suites; `.SRCINFO` byte-identical to `makepkg --printsrcinfo`; parent reran seven suites (107 pass), `render.mjs --check` exit 0, PKGBUILD shellcheck exit 0, the real-tarball makepkg build still passes; parent added the README maintainer line (D4); commit `d2ded27`.
   - [ ] C15b ps1 install hardening (C1, C4 to C8, C11)
-  - [ ] C15c ps1 uninstall ownership and Gemini parse (C2, C3, C8 to C10, C12)
-  - [ ] C11c sh Gemini strict match (C3)
+  - [x] C15c ps1 uninstall ownership and Gemini parse (C2, C3, C8 to C10, C12). Evidence: chef RED 10 fail with C2 and C3 reproduced exactly, GREEN 62 pass; parent private bundle 81 pass across five ps1 suites; commit `953f916`.
+  - [x] C11c sh Gemini strict match (C3). Evidence: nappy RED 2 fail (C3 reproduction and nested object), the dot tests proven by a temporary unescaped-regex mutation, GREEN 47 pass; parent regenerated `install.sh`: 179 pass across twelve Linux suites, shellcheck exit 0, no drift; commit `fb07602`.
   - [ ] Review wave 3 (before the PR): README claim check, lifecycle state machine, PR hygiene.
 - [ ] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0.
 - [ ] Deliver: commits staged by explicit path under the owner identity, no co-author trailer; PR body written to a file and opened with `--body-file`; `pr-registry.mjs pr install-coverage --number <N>`.
