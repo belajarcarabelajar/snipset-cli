@@ -61,13 +61,15 @@ command -v curl >/dev/null || { echo 'install.sh: curl is required' >&2; exit 1;
 command -v tar >/dev/null || { echo 'install.sh: tar is required' >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo 'install.sh: sha256sum is required' >&2; exit 1; }
 for path_value in "$install_dir" "$share_dir" "$bashrc" "$db"; do
+  # shellcheck disable=SC1003 # '\' is a literal backslash pattern, not a quote escape
   case "$path_value" in
     *$'\n'*|*$'\r'*|*'"'*|*'`'*|*'\'*|*'$'*)
       echo 'install.sh: path must not contain newline or shell-special characters (" ` \ $)' >&2; exit 2 ;;
   esac
 done
+curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
 if [[ -z "$version" ]]; then
-  version="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  version="$(curl -fsSL "${curl_opts[@]}" "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
   [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: release version was not found' >&2; exit 1; }
 else
   [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo 'install.sh: invalid version' >&2; exit 2; }
@@ -79,8 +81,8 @@ release_url="${base_url}/${version}"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/snipset-install.XXXXXX")"
 cleanup() { rm -rf "$tmp" "${stage:-}"; }
 trap cleanup EXIT
-curl -fsSL "${release_url}/SHA256SUMS" -o "${tmp}/SHA256SUMS"
-curl -fsSL "${release_url}/${archive}" -o "${tmp}/${archive}"
+curl -fsSL "${curl_opts[@]}" "${release_url}/SHA256SUMS" -o "${tmp}/SHA256SUMS"
+curl -fsSL "${curl_opts[@]}" "${release_url}/${archive}" -o "${tmp}/${archive}"
 expected="$(awk -v name="$archive" '{ fname=$2; sub(/^[*]/, "", fname); if (fname == name) { print $1 } }' "${tmp}/SHA256SUMS")"
 [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { echo 'install.sh: checksum entry missing' >&2; exit 1; }
 actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
@@ -124,6 +126,7 @@ if ((do_shell)) && ((has_shell)); then
   if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
     {
       printf '\n# snipset-terminal-integration (managed by snipset installer; safe to remove)\n'
+      # shellcheck disable=SC2016 # $PATH is written literally into .bashrc
       printf 'if ! command -v snipset >/dev/null 2>&1; then export PATH="%s:$PATH"; fi\n' "$install_dir"
       printf '[ -f "%s/snipset.sh" ] && . "%s/snipset.sh"\n' "$share_dir" "$share_dir"
       printf '[ -f "%s/completion.bash" ] && . "%s/completion.bash"\n' "$share_dir" "$share_dir"
@@ -170,8 +173,10 @@ if ((do_mcp)); then
   else
     mkdir -p "$(dirname "$mcp_config")"
     if [[ -n "$db" ]]; then
+      # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
       printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp","--db","%s"],"enabled":true}}}\n' "$snipset_bin" "$db" > "$mcp_config"
     else
+      # shellcheck disable=SC2016 # "$schema" is a literal JSON key in opencode.json
       printf '{"$schema":"https://opencode.ai/config.json","mcp":{"snipset":{"type":"local","command":["%s","mcp"],"enabled":true}}}\n' "$snipset_bin" > "$mcp_config"
     fi
   fi

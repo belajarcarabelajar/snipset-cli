@@ -95,10 +95,12 @@ async function fakeRelease({
   const marker = starMarker ? "*" : " ";
   await writeFile(sums, `${badHash ? "0".repeat(64) : hash} ${marker}${archive.split("/").pop()}\n`);
   const curl = join(binDir, "curl");
+  const curlLog = join(dir, "curl.log");
   await writeFile(
     curl,
     `#!/bin/sh
 set -eu
+printf '%s\\n' "$*" >> "${curlLog}"
 url=""
 out=""
 while [ "$#" -gt 0 ]; do
@@ -117,7 +119,7 @@ if [ -n "$out" ]; then printf '%s' "$data" > "$out"; else printf '%s\\n' "$data"
 `
   );
   await chmod(curl, 0o755);
-  return { dir, binDir, archive, sums };
+  return { dir, binDir, archive, sums, curlLog };
 }
 
 test("installs a pinned release and preserves an existing binary on rerun", async () => {
@@ -360,6 +362,36 @@ test("does not warn when the shim generator reports output", async () => {
     const result = await run("bash", [script, "--version", "0.1.0", "--install-dir", installDir], { env });
     assert.doesNotMatch(result.stderr, /shim generator produced no output/);
     assert.ok(existsSync(join(installDir, "snipset")));
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("curl calls carry retry and stall limits", async () => {
+  const fixture = await fakeRelease();
+  const home = await mkdtemp(join(tmpdir(), "snipset-home-"));
+  const installDir = join(home, "bin");
+  try {
+    const env = await freshEnv(fixture, home);
+    await run("bash", [script, "--install-dir", installDir], { env });
+    const calls = (await readFile(fixture.curlLog, "utf8")).trim().split("\n");
+    assert.equal(calls.length, 3);
+    const required = [
+      ["--retry", "3"],
+      ["--connect-timeout", "15"],
+      ["--speed-limit", "1024"],
+      ["--speed-time", "60"],
+    ];
+    for (const call of calls) {
+      const args = call.split(" ");
+      for (const [flag, value] of required) {
+        assert.ok(
+          args.some((arg, i) => arg === flag && args[i + 1] === value),
+          `curl call lacks ${flag} ${value}: ${call}`
+        );
+      }
+    }
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });

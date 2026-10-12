@@ -6,10 +6,11 @@ import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { createDummyDb } from "./dummy-db.mjs";
+import { snipsetSkip } from "./snipset-bin.mjs";
 
 const run = promisify(execFile);
 
-test("creates dummy database matching snipset doctor schema fingerprint", async () => {
+test("creates dummy database matching snipset doctor schema fingerprint", { skip: snipsetSkip }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "snipset-dummy-test-"));
   const dbPath = join(dir, "snipset-dummy.db");
 
