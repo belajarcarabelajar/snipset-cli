@@ -51,6 +51,18 @@ The repository has no lint, type check, or build step besides these. Test revers
 
 **Reviewer verdict:** `correct`. No P0 or P1 findings (confidence 0.85). It changes to `not correct` if a real `snipset` write subcommand matches a read pattern in `scripts/snipset-live.sh:67-77`, or if `bun test tests/` goes red on a host without `snipset`.
 
+## 5a. Follow-ups Added After Review
+
+Selected by the owner in the session-close debt sweep and landed on this branch:
+
+| Commit | Change | Evidence |
+|---|---|---|
+| `ab99c80` | `install.ps1` runs `Add-Type -AssemblyName System.IO.Compression.FileSystem` before `ZipFile.OpenRead`; on .NET Framework (Windows PowerShell 5.1) `ZipFile` lives in that assembly | contract red without the line, `bun test tests/install-ps1.test.mjs` 3 pass with it; not run on a 5.1 host |
+| `524cd8a` | `tests/snipset-live-cli-drift.test.mjs` fails when `snipset <group> --help` lists a subcommand the wrapper tables do not classify | 10 pass; a table mutation fails naming the subcommand; 10 skip without the binary |
+| `aa26e5d` | Targeted ShellCheck directives with reasons for the 4 intentional notes in `install.sh` | `shellcheck install.sh` exit 1 before, exit 0 after; comment-only diff |
+
+Final state: `bun test tests/` 114 pass, 0 fail; without `snipset` and `pwsh` 84 pass, 30 skip, 0 fail; `shellcheck install.sh scripts/snipset-live.sh` at default severity exit 0. The plan is `Complete` (readiness `NEEDS-HUMAN`, owner chose Mark Complete; T3 and T8 have no machine `skip_if` by design and passed in the final runner run). `.gitignore` now ignores the derived `graphify-out/` graph, matching the Snipset repository.
+
 ## 6. Risk, Rollout, Rollback
 
 | Concern | Answer |
@@ -65,10 +77,11 @@ The repository has no lint, type check, or build step besides these. Test revers
 ## 7. Pre-Existing Issues and Deferred Debt
 
 - `scripts/snipset-live.sh:44-47` copies the database and then its `-wal` with two `cp` calls, so a write between them can give an inconsistent snapshot. Not reproduced. `defer: two-step copy, a reproduced inconsistent snapshot`.
-- `install.ps1:32` calls `[IO.Compression.ZipFile]::OpenRead`. On Windows PowerShell 5.1 that type may need `Add-Type -AssemblyName System.IO.Compression.FileSystem`; unverified, present since the first commit. `defer: no Windows host, next Windows verification session`.
+- `install.ps1` now loads `System.IO.Compression.FileSystem` (`ab99c80`), but no Windows PowerShell 5.1 host has run it. `defer: no Windows host, next Windows verification session`.
 - `install.ps1` handle release is not observable on Linux. `defer: same Windows session`.
-- `install.sh` carries 4 ShellCheck notes (SC2016 x3, SC1003 x1), identical before and after this change; they flag intentionally literal strings.
 - The `test` workflow is red on every run because the runner has no `snipset` binary; this PR removes that failure mode, but CI itself is out of scope here.
+- The read allowlist lives in three hand-kept copies (`scripts/snipset-live.sh`, `tests/snipset-live-routing.test.mjs`, `tests/snipset-live-cli-drift.test.mjs`). `defer: three copies, an allowlist change that updates one copy and not the others`.
+- With Snipset Desktop running, each read after a new `-wal` write recopies the database; the frequency was not measured. `defer: unmeasured, slow wrapper reads reported`.
 
 ## 8. Checklist
 
