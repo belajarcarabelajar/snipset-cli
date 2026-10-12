@@ -242,6 +242,7 @@ function Test-SnipsetMcp {
         'foreign' { Write-SnipsetReport -Status KEEP -Item $id -Detail 'snipset points elsewhere' }
         'scoped' { Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpScopedDetail -Id $id -Scope $scope) }
         'unreadable' { Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpUnreadableDetail) }
+        { $_ -eq 'other' -and $id -in 'opencode', 'cursor' } { Write-SnipsetReport -Status KEEP -Item $id -Detail "$(Get-SnipsetMcpFile -Id $id) exists without snipset; not managed by the installer" }
         default { Write-SnipsetReport -Status MISSING -Item $id -Detail 'snipset is not registered' }
       }
     } catch {

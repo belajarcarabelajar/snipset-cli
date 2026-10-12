@@ -347,6 +347,41 @@ test("Test-SnipsetMcp without ids skips mcp", OPTS, async () => {
   assert.deepEqual(calls(sb), []);
 });
 
+const checkWithRun = (sb, opts) =>
+  ps(sb, "$run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }; Test-SnipsetMcp -Ids $ids -Bin $env:BIN; \"drift=$($run.drift)\"", opts);
+
+test("vscode: an mcp.json without snipset makes code --add-mcp run once and the check has no drift", OPTS, async () => {
+  const { sb, bin, paths } = setup();
+  writeFile(paths.vscode, '{"servers":{}}\n');
+  const r = await install(sb, { ids: ["vscode"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(results(r.stdout), ["[ADD] vscode: snipset registered"]);
+  assert.deepEqual(adds(sb), [["code", "--add-mcp", JSON.stringify({ name: "snipset", command: bin, args: ["mcp"] })]]);
+  const c = await checkWithRun(sb, { ids: ["vscode"], bin });
+  assert.equal(c.code, 0, c.stderr);
+  assert.deepEqual(results(c.stdout), [`[OK] vscode: snipset points at ${bin}`]);
+  assert.ok(c.stdout.split(/\r?\n/).includes("drift=0"), c.stdout);
+});
+
+test("an opencode or cursor file without snipset is kept at install and is not drift in Test-SnipsetMcp", OPTS, async () => {
+  const { sb, bin, paths } = setup({ stubs: [] });
+  writeFile(paths.opencode, '{"mcp":{}}\n');
+  writeFile(paths.cursor, '{"mcpServers":{}}\n');
+  const r = await install(sb, { ids: ["opencode", "cursor"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(results(r.stdout), [
+    `[KEEP] opencode: ${paths.opencode} exists; left untouched`,
+    `[KEEP] cursor: ${paths.cursor} exists; left untouched`,
+  ]);
+  const c = await checkWithRun(sb, { ids: ["opencode", "cursor"], bin });
+  assert.equal(c.code, 0, c.stderr);
+  assert.deepEqual(results(c.stdout), [
+    `[KEEP] opencode: ${paths.opencode} exists without snipset; not managed by the installer`,
+    `[KEEP] cursor: ${paths.cursor} exists without snipset; not managed by the installer`,
+  ]);
+  assert.ok(c.stdout.split(/\r?\n/).includes("drift=0"), c.stdout);
+});
+
 test("Remove-SnipsetMcp without ids scans all six and keeps a foreign entry", OPTS, async () => {
   const { sb, bin, paths } = setup();
   seed(sb, "codex", "/elsewhere/snipset");
