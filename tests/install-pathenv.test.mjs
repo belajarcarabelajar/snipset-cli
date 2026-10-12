@@ -313,3 +313,60 @@ test("a read-only ~/.profile fails the uninstall, stays byte-identical, and name
   assert.equal(read(sb.at(".bashrc")), USER_FILES[".bashrc"], out.stdout);
   assert.equal(out.code, 1, out.stdout + out.stderr);
 });
+
+const notOurs = (label, file, line) =>
+  `[KEEP] ${label}: ${file}: not written by the installer; add the line by hand: ${line}\n`;
+
+test("a user's own conf.d/snipset.fish survives install and uninstall byte-identical", async () => {
+  const sb = setup();
+  stubCommand(sb, "fish", "exit 0\n");
+  const conf = sb.at(".config", "fish", "conf.d", "snipset.fish");
+  const mine = "abbr -a sn snipset\n";
+  seed(conf, mine);
+  const install = await ok(sb, QUIET);
+  assert.equal(read(conf), mine, install.stdout);
+  assert.ok(install.stdout.includes(notOurs("path fish", conf, `source "${join(sb.share, "env.fish")}"`)), install.stdout);
+  const out = await ok(sb, ["--uninstall", ...QUIET]);
+  assert.equal(read(conf), mine, out.stdout);
+  assert.ok(out.stdout.includes(`[KEEP] path fish: ${conf} not written by the installer; left in place\n`), out.stdout);
+});
+
+test("a user's own env and env.fish in a custom --share-dir survive install and uninstall byte-identical", async () => {
+  const sb = setup();
+  stubCommand(sb, "fish", "exit 0\n");
+  const share = sb.at("mystuff");
+  const flags = [...QUIET, "--share-dir", share];
+  const mine = { env: "MY=1\n", "env.fish": "set -gx MY 1\n" };
+  for (const [name, content] of Object.entries(mine)) seed(join(share, name), content);
+  const before = snapshotTree(sb.home);
+  const install = await ok(sb, flags);
+  for (const [name, content] of Object.entries(mine)) assert.equal(read(join(share, name)), content, install.stdout);
+  assert.ok(install.stdout.includes(notOurs("path env",join(share, "env"), `export PATH="${sb.installDir}:$PATH"`)), install.stdout);
+  assert.ok(
+    install.stdout.includes(notOurs("path env.fish", join(share, "env.fish"), `set -gx PATH "${sb.installDir}" $PATH`)),
+    install.stdout,
+  );
+  // A source line or fish conf would run the user's file at every login.
+  for (const name of [".profile", ".zshenv", ".config"]) assert.equal(existsSync(sb.at(name)), false, name);
+  await ok(sb, ["--uninstall", ...flags]);
+  const outsideLocal = (tree) => tree.filter((entry) => !entry.path.startsWith(".local"));
+  assert.deepEqual(diffSnapshots(outsideLocal(before), outsideLocal(snapshotTree(sb.home))), []);
+});
+
+test("a managed env and fish conf from an earlier install are rewritten in place", async () => {
+  const sb = setup();
+  stubCommand(sb, "fish", "exit 0\n");
+  const conf = sb.at(".config", "fish", "conf.d", "snipset.fish");
+  const target = sb.at("dotfiles", "snipset.fish");
+  seed(target, fishConfText("/old/share"));
+  mkdirSync(join(conf, ".."), { recursive: true });
+  symlinkSync(target, conf);
+  seed(join(sb.share, "env"), envText("/old/bin"));
+  const out = await ok(sb, QUIET);
+  assert.doesNotMatch(out.stdout, /^\[KEEP\] path/m, out.stdout);
+  assert.equal(read(join(sb.share, "env")), envText(sb.installDir));
+  assert.ok(lstatSync(conf).isSymbolicLink());
+  assert.equal(read(target), fishConfText(sb.share));
+  assert.equal(countLine(sb.at(".profile"), sourceLine(sb.share)), 1);
+  assert.deepEqual(strays(sb), []);
+});
