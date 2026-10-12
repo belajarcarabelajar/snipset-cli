@@ -199,7 +199,8 @@ mcp_install() {
           report KEEP "$id" 'snipset is already registered'
         fi ;;
       *)
-        if [[ "$state" != absent ]]; then
+        # VS Code merges into its own mcp.json, so a file without snipset still gets an add.
+        if [[ "$state" != absent && "$state" != other ]]; then
           report KEEP "$id" 'snipset is already registered'
         elif mcp_add "$id"; then
           report ADD "$id" 'snipset registered'
@@ -225,10 +226,11 @@ mcp_check() {
       continue
     fi
     read -r state scope <<< "$(mcp_probe "$id")"
-    case "$state" in
-      mine) report OK "$id" "snipset points at ${snipset_bin}" ;;
-      foreign) report KEEP "$id" 'snipset points elsewhere' ;;
-      scoped) report KEEP "$id" "$(mcp_scoped_detail "$id" "$scope")" ;;
+    case "${id}:${state}" in
+      *:mine) report OK "$id" "snipset points at ${snipset_bin}" ;;
+      *:foreign) report KEEP "$id" 'snipset points elsewhere' ;;
+      *:scoped) report KEEP "$id" "$(mcp_scoped_detail "$id" "$scope")" ;;
+      opencode:other|cursor:other) report KEEP "$id" "$(mcp_file "$id") exists without snipset; not managed by the installer" ;;
       *) report MISSING "$id" 'snipset is not registered' ;;
     esac
   done

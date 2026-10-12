@@ -270,6 +270,38 @@ test("check without a --with-mcp list skips mcp", async () => {
   assert.deepEqual(results(r.stdout), []);
 });
 
+test("vscode: an mcp.json without snipset makes code --add-mcp run once and check passes", async () => {
+  const { sb, bin, paths, args } = setup();
+  writeFile(paths.vscode, '{"servers":{}}\n');
+  const r = await runInstaller(sb, [...args, "--with-mcp=vscode"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(results(r.stdout), ["[ADD] vscode: snipset registered"]);
+  assert.deepEqual(adds(sb), [["code", "--add-mcp", JSON.stringify({ name: "snipset", command: bin, args: ["mcp"] })]]);
+  const c = await runInstaller(sb, [...args, "--check", "--with-mcp=vscode"]);
+  assert.deepEqual(results(c.stdout), [`[OK] vscode: snipset points at ${bin}`]);
+  assert.equal(c.code, 0, c.stdout + c.stderr);
+});
+
+test("an opencode or cursor file without snipset is kept at install and is not drift in check", async () => {
+  const { sb, paths, args } = setup({ stubs: [] });
+  writeFile(paths.opencode, '{"mcp":{}}\n');
+  writeFile(paths.cursor, '{"mcpServers":{}}\n');
+  const r = await runInstaller(sb, [...args, "--with-mcp=opencode,cursor"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(results(r.stdout), [
+    `[KEEP] opencode: ${paths.opencode} exists; left untouched`,
+    `[KEEP] cursor: ${paths.cursor} exists; left untouched`,
+  ]);
+  const c = await runInstaller(sb, [...args, "--check", "--with-mcp=opencode,cursor"]);
+  assert.deepEqual(results(c.stdout), [
+    `[KEEP] opencode: ${paths.opencode} exists without snipset; not managed by the installer`,
+    `[KEEP] cursor: ${paths.cursor} exists without snipset; not managed by the installer`,
+  ]);
+  assert.equal(c.code, 0, c.stdout + c.stderr);
+  assert.equal(readFileSync(paths.opencode, "utf8"), '{"mcp":{}}\n');
+  assert.equal(readFileSync(paths.cursor, "utf8"), '{"mcpServers":{}}\n');
+});
+
 test("uninstall removes only entries that point at the installed binary", async () => {
   const { sb, paths, args } = setup();
   seed(sb, "codex", "/elsewhere/snipset");
