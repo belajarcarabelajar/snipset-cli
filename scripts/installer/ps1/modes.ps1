@@ -159,6 +159,7 @@ function Invoke-SnipsetUninstall {
   # The exe goes first: the PATH entry stays while a kept or locked exe still sits in the dir.
   $exeKept = [bool](Get-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue)
   Remove-SnipsetPathEnv -Dir $InstallDir -ExeKept:$exeKept
+  Clear-SnipsetOldExe -InstallDir $InstallDir -Status REMOVED
   Remove-SnipsetInstallDir -InstallDir $InstallDir
   Write-Output "uninstall: removed $($run.removed), kept $($run.kept)"
   if ($run.fail -gt 0) { throw "uninstall: $($run.fail) steps failed" }
