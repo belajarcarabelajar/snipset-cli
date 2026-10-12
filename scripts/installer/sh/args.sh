@@ -10,7 +10,7 @@ Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
 
   --version VERSION  Release to install (default: latest).
   --install-dir DIR  Binary destination (default: ~/.local/bin).
-  --add-path         Append the install dir to PATH in ~/.profile.
+  --add-path         Add the install dir to PATH for bash, zsh, and fish (writes <share-dir>/env).
   --share-dir DIR    Shell bundle destination (default: ~/.local/share/snipset).
   --db PATH          Database for init/shims (default: the CLI default).
   --bashrc PATH      Shell startup file for integration (default: ~/.bashrc).
@@ -18,12 +18,16 @@ Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
   --no-shell         Skip shell integration.
   --no-shims         Skip generating trigger shims.
   --with-mcp         Write ~/.config/opencode/opencode.json if absent.
+                     An existing entry is never changed.
   --with-mcp=LIST    Register MCP for LIST: claude,codex,gemini,opencode,cursor,vscode or all.
+                     An existing entry is never changed.
   --from DIR         Install from SHA256SUMS and the archive in DIR (no download).
   --dry-run          Print every step and write nothing.
   --check            Report drift of an install made with the same flags (exit 1 on drift).
   --update           Install the latest (or --version) release over the current one.
-  --uninstall        Remove what an install with the same flags wrote.
+  --uninstall        Remove what an install with the same flags wrote, including MCP
+                     entries for the --with-mcp list you pass (the same list as the
+                     install). Never removes the database.
   --help, -h         Show this help and exit.
 EOF
 }

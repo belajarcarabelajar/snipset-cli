@@ -34,7 +34,7 @@ const USAGE_LINES = [
   "                  [--help]",
   "  --version VERSION  Release to install (default: latest).",
   "  --install-dir DIR  Binary destination (default: ~/.local/bin).",
-  "  --add-path         Append the install dir to PATH in ~/.profile.",
+  "  --add-path         Add the install dir to PATH for bash, zsh, and fish (writes <share-dir>/env).",
   "  --share-dir DIR    Shell bundle destination (default: ~/.local/share/snipset).",
   "  --db PATH          Database for init/shims (default: the CLI default).",
   "  --bashrc PATH      Shell startup file for integration (default: ~/.bashrc).",

@@ -196,7 +196,7 @@ test("--db is forwarded to every harness", async () => {
 test("a failing add reports its first stderr line and the loop continues", async () => {
   const { sb, args } = setup({ failAdd: ["claude"] });
   const r = await runInstaller(sb, [...args, "--with-mcp=claude,codex"]);
-  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.code, 1, r.stderr);
   assert.deepEqual(results(r.stdout), ["[FAIL] claude: boom first", "[ADD] codex: snipset registered"]);
 });
 
