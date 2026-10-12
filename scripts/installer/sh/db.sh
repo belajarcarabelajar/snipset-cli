@@ -15,5 +15,15 @@ db_init() {
   fi
 }
 db_check() {
-  report SKIP database 'not checked yet'
+  if [[ -z "$db" ]]; then
+    report SKIP database 'default location (run snipset doctor)'
+  elif [[ -e "$db" ]]; then
+    report OK database "$db"
+  else
+    report MISSING database "$db"
+  fi
+}
+# Never deletes anything: the database holds the user's data.
+db_remove() {
+  report KEEP database 'never removed by uninstall'
 }
