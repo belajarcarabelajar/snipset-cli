@@ -480,7 +480,7 @@ tasks:
       - cmd: "bash -c '! git diff --name-only --diff-filter=AM origin/main...HEAD | xargs -r rg -l --max-columns=0 \"\\x{2014}\"'"
         expect_exit: 0
         retry: 0
-      - cmd: "bash -c '! git log origin/main..HEAD --format=%B | rg -i \"co-authored-by|generated with|claude code\"'"
+      - cmd: "bash -c '! git log origin/main..HEAD --format=%B | rg -i \"co-authored-by|generated with|\\x{1F916}\"'"
         expect_exit: 0
         retry: 0
 ---
