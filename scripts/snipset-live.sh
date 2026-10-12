@@ -38,8 +38,9 @@ mkdir -p "$snap_dir"
 # user owns the path, which is the safe outcome for a shared location.
 [[ "$snap_dir" == "/" ]] || chmod 700 "$snap_dir"
 snap="$snap_dir/snipset.db"
-# Refresh when forced, missing, or older than the live database.
-if ((refresh)) || [[ ! -f "$snap" ]] || [[ "$live" -nt "$snap" ]]; then
+# Refresh when forced, missing, or older than the live database or its -wal;
+# WAL-mode commits land in -wal and leave the main file mtime unchanged.
+if ((refresh)) || [[ ! -f "$snap" ]] || [[ "$live" -nt "$snap" ]] || [[ "$live-wal" -nt "$snap" ]]; then
   cp -f "$live" "$snap"
   for ext in -wal -shm; do
     if [[ -f "$live$ext" ]]; then cp -f "$live$ext" "$snap$ext"; else rm -f "$snap$ext"; fi
