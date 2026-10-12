@@ -31,19 +31,34 @@ function Remove-SnipsetExe {
     Write-SnipsetReport -Status SKIP -Item 'binary' -Detail "$exe not found"
     return
   }
-  if (Test-SnipsetWindowsHost) {
-    $ours = Test-SnipsetBinary -Path $exe
-    $why = 'does not answer --version as snipset'
-  } else {
-    $ours = (-not $item.PSIsContainer) -and (-not $item.LinkType)
-    $why = 'is not a regular file'
-  }
-  if (-not $ours) {
-    Write-SnipsetReport -Status KEEP -Item 'binary' -Detail "$exe $why; left in place"
+  # A link answers --version for its target, which the installer never wrote.
+  if ($item.PSIsContainer -or $item.LinkType) {
+    Write-SnipsetReport -Status KEEP -Item 'binary' -Detail "$exe is not a regular file; left in place"
     return
   }
-  Remove-Item -LiteralPath $exe -Force
+  if ((Test-SnipsetWindowsHost) -and -not (Test-SnipsetBinary -Path $exe)) {
+    Write-SnipsetReport -Status KEEP -Item 'binary' -Detail "$exe does not answer --version as snipset; left in place"
+    return
+  }
+  try {
+    Remove-Item -LiteralPath $exe -Force
+  } catch {
+    $e = $_.Exception
+    # Windows refuses to delete a running exe, for example one an MCP host started.
+    $detail = if ($e -is [IO.IOException] -or $e -is [UnauthorizedAccessException]) { "in use (close the program using it): $exe" } else { $e.Message }
+    Write-SnipsetReport -Status FAIL -Item 'binary' -Detail $detail
+    return
+  }
   Write-SnipsetReport -Status REMOVED -Item 'binary' -Detail $exe
+}
+
+function Remove-SnipsetInstallDir {
+  param([string]$InstallDir)
+  $item = Get-Item -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue
+  if (-not $item -or -not $item.PSIsContainer -or $item.LinkType) { return }
+  if ([IO.Directory]::GetFileSystemEntries($InstallDir).Length -gt 0) { return }
+  # Best effort like rmdir in install.sh: a dir in use stays, and that is not a failed uninstall.
+  try { [IO.Directory]::Delete($InstallDir) } catch { }
 }
 
 function Invoke-SnipsetInstall {
@@ -116,8 +131,11 @@ function Invoke-SnipsetUninstall {
   } else {
     Write-SnipsetReport -Status SKIP -Item 'mcp' -Detail 'no -WithMcp list'
   }
-  Remove-SnipsetPathEnv -Dir $InstallDir
   Remove-SnipsetExe -InstallDir $InstallDir
+  # The exe goes first: the PATH entry stays while a kept or locked exe still sits in the dir.
+  $exeKept = [bool](Get-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue)
+  Remove-SnipsetPathEnv -Dir $InstallDir -ExeKept:$exeKept
+  Remove-SnipsetInstallDir -InstallDir $InstallDir
   Write-Output "uninstall: removed $($run.removed), kept $($run.kept)"
   if ($run.fail -gt 0) { throw "uninstall: $($run.fail) steps failed" }
 }

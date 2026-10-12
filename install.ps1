@@ -299,6 +299,12 @@ function Set-SnipsetUserPath {
   [Environment]::SetEnvironmentVariable($probe, $null, 'User')
 }
 
+# Written only when the install itself adds the entry, so uninstall never drops an entry the user had before.
+function Get-SnipsetPathMarker {
+  param([string]$Dir)
+  Join-Path $Dir '.snipset-path-added'
+}
+
 function Install-SnipsetPathEnv {
   param([string]$Dir)
   if (-not (Test-SnipsetWindowsHost)) {
@@ -311,6 +317,8 @@ function Install-SnipsetPathEnv {
     return
   }
   Set-SnipsetUserPath -Raw (Add-SnipsetPathEntry -Raw $raw -Dir $Dir)
+  [void][IO.Directory]::CreateDirectory($Dir)
+  [IO.File]::WriteAllText((Get-SnipsetPathMarker -Dir $Dir), "$Dir`n")
   Write-SnipsetReport -Status ADD -Item 'path' -Detail "added $Dir to the user PATH; open a new terminal to use it"
 }
 
@@ -328,17 +336,29 @@ function Test-SnipsetPathEnv {
 }
 
 function Remove-SnipsetPathEnv {
-  param([string]$Dir)
+  param([string]$Dir, [switch]$ExeKept)
   if (-not (Test-SnipsetWindowsHost)) {
     Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not a Windows host'
     return
   }
+  $marker = Get-SnipsetPathMarker -Dir $Dir
+  $recorded = [IO.File]::Exists($marker)
   $raw = Get-SnipsetUserPath
   if (-not (Test-SnipsetPathEntry -Raw $raw -Dir $Dir)) {
+    if ($recorded -and -not $ExeKept) { [IO.File]::Delete($marker) }
     Write-SnipsetReport -Status SKIP -Item 'path' -Detail "$Dir is not on the user PATH"
     return
   }
+  if (-not $recorded) {
+    Write-SnipsetReport -Status KEEP -Item 'path' -Detail "$Dir was on the user PATH before the install"
+    return
+  }
+  if ($ExeKept) {
+    Write-SnipsetReport -Status KEEP -Item 'path' -Detail "$Dir stays on the user PATH while snipset.exe is kept"
+    return
+  }
   Set-SnipsetUserPath -Raw (Remove-SnipsetPathEntry -Raw $raw -Dir $Dir)
+  [IO.File]::Delete($marker)
   Write-SnipsetReport -Status REMOVED -Item 'path' -Detail "$Dir from the user PATH"
 }
 function Get-SnipsetMcpCliName {
@@ -450,13 +470,24 @@ function Get-SnipsetMcpGeminiState {
   param([string]$Cli, [string]$Bin)
   $settings = Get-SnipsetMcpGeminiSettings
   $text = if ([IO.File]::Exists($settings)) { [IO.File]::ReadAllText($settings) } else { '' }
-  if ($text.Contains('"snipset"')) {
-    if ($text.Contains((ConvertTo-Json -InputObject $Bin -Compress))) { return 'mine' }
-    return 'foreign'
+  if ($text.Contains('snipset')) {
+    # Parsed, not searched: a "snipset-dev" entry holding the bin must not make "snipset" look ours,
+    # and Windows PowerShell 5.1 writes ' as \u0027.
+    try { $doc = ConvertFrom-Json -InputObject $text } catch { return 'unreadable' }
+    $servers = if ($doc) { $doc.mcpServers }
+    $entry = if ($servers) { @($servers.PSObject.Properties | Where-Object { $_.Name -ceq 'snipset' })[0] }
+    if ($entry) {
+      if ("$($entry.Value.command)" -ceq $Bin) { return 'mine' }
+      return 'foreign'
+    }
   }
   $result = Invoke-SnipsetMcpCli -Path $Cli -Arguments @('mcp', 'list')
   if ($result.Code -eq 0 -and ($result.Out | Where-Object { $_ -match '(^|\s)snipset:' })) { return 'scoped' }
   'absent'
+}
+
+function Get-SnipsetMcpUnreadableDetail {
+  "$(Get-SnipsetMcpGeminiSettings) is not valid JSON; left untouched"
 }
 
 # Detail for an entry the installer leaves alone because it sits in another scope.
@@ -466,8 +497,9 @@ function Get-SnipsetMcpScopedDetail {
   "snipset is registered outside $(Get-SnipsetMcpGeminiSettings); left untouched"
 }
 
-# Returns nocli, absent, other (file without snipset), mine, foreign, or scoped (the bin
-# is registered in a scope the installer does not own); claude adds a second word naming the scope.
+# Returns nocli, absent, other (file without snipset), mine, foreign, scoped (the bin
+# is registered in a scope the installer does not own), or unreadable (gemini settings that are
+# not JSON); claude adds a second word naming the scope.
 function Get-SnipsetMcpState {
   param([string]$Id, [string]$Bin)
   $cli = Find-SnipsetMcpCli -Id $Id
@@ -524,6 +556,10 @@ function Install-SnipsetMcp {
         }
         continue
       }
+      if ($state -eq 'unreadable') {
+        Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpUnreadableDetail)
+        continue
+      }
       if ($state -in 'mine', 'foreign', 'scoped') {
         Write-SnipsetReport -Status KEEP -Item $id -Detail 'snipset is already registered'
         continue
@@ -568,6 +604,7 @@ function Test-SnipsetMcp {
         'mine' { Write-SnipsetReport -Status OK -Item $id -Detail "snipset points at $Bin" }
         'foreign' { Write-SnipsetReport -Status KEEP -Item $id -Detail 'snipset points elsewhere' }
         'scoped' { Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpScopedDetail -Id $id -Scope $scope) }
+        'unreadable' { Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpUnreadableDetail) }
         default { Write-SnipsetReport -Status MISSING -Item $id -Detail 'snipset is not registered' }
       }
     } catch {
@@ -589,6 +626,8 @@ function Remove-SnipsetMcp {
         Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpScopedDetail -Id $id -Scope $scope)
       } elseif ($state -eq 'foreign') {
         Write-SnipsetReport -Status KEEP -Item $id -Detail 'snipset points elsewhere'
+      } elseif ($state -eq 'unreadable') {
+        Write-SnipsetReport -Status KEEP -Item $id -Detail (Get-SnipsetMcpUnreadableDetail)
       } elseif ($state -ne 'mine') {
         Write-SnipsetReport -Status SKIP -Item $id -Detail 'snipset is not registered'
       } elseif ($id -eq 'vscode') {
@@ -648,19 +687,34 @@ function Remove-SnipsetExe {
     Write-SnipsetReport -Status SKIP -Item 'binary' -Detail "$exe not found"
     return
   }
-  if (Test-SnipsetWindowsHost) {
-    $ours = Test-SnipsetBinary -Path $exe
-    $why = 'does not answer --version as snipset'
-  } else {
-    $ours = (-not $item.PSIsContainer) -and (-not $item.LinkType)
-    $why = 'is not a regular file'
-  }
-  if (-not $ours) {
-    Write-SnipsetReport -Status KEEP -Item 'binary' -Detail "$exe $why; left in place"
+  # A link answers --version for its target, which the installer never wrote.
+  if ($item.PSIsContainer -or $item.LinkType) {
+    Write-SnipsetReport -Status KEEP -Item 'binary' -Detail "$exe is not a regular file; left in place"
     return
   }
-  Remove-Item -LiteralPath $exe -Force
+  if ((Test-SnipsetWindowsHost) -and -not (Test-SnipsetBinary -Path $exe)) {
+    Write-SnipsetReport -Status KEEP -Item 'binary' -Detail "$exe does not answer --version as snipset; left in place"
+    return
+  }
+  try {
+    Remove-Item -LiteralPath $exe -Force
+  } catch {
+    $e = $_.Exception
+    # Windows refuses to delete a running exe, for example one an MCP host started.
+    $detail = if ($e -is [IO.IOException] -or $e -is [UnauthorizedAccessException]) { "in use (close the program using it): $exe" } else { $e.Message }
+    Write-SnipsetReport -Status FAIL -Item 'binary' -Detail $detail
+    return
+  }
   Write-SnipsetReport -Status REMOVED -Item 'binary' -Detail $exe
+}
+
+function Remove-SnipsetInstallDir {
+  param([string]$InstallDir)
+  $item = Get-Item -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue
+  if (-not $item -or -not $item.PSIsContainer -or $item.LinkType) { return }
+  if ([IO.Directory]::GetFileSystemEntries($InstallDir).Length -gt 0) { return }
+  # Best effort like rmdir in install.sh: a dir in use stays, and that is not a failed uninstall.
+  try { [IO.Directory]::Delete($InstallDir) } catch { }
 }
 
 function Invoke-SnipsetInstall {
@@ -733,8 +787,11 @@ function Invoke-SnipsetUninstall {
   } else {
     Write-SnipsetReport -Status SKIP -Item 'mcp' -Detail 'no -WithMcp list'
   }
-  Remove-SnipsetPathEnv -Dir $InstallDir
   Remove-SnipsetExe -InstallDir $InstallDir
+  # The exe goes first: the PATH entry stays while a kept or locked exe still sits in the dir.
+  $exeKept = [bool](Get-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue)
+  Remove-SnipsetPathEnv -Dir $InstallDir -ExeKept:$exeKept
+  Remove-SnipsetInstallDir -InstallDir $InstallDir
   Write-Output "uninstall: removed $($run.removed), kept $($run.kept)"
   if ($run.fail -gt 0) { throw "uninstall: $($run.fail) steps failed" }
 }
