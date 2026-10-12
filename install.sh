@@ -6,6 +6,11 @@
 # trigger), and generated trigger shims. Every setup step is idempotent and
 # strictly opt-out; only the binary install itself is mandatory.
 set -euo pipefail
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  # mapfile and empty arrays under set -u need 4.4; note and die are not defined yet.
+  printf 'install.sh: bash 4.4 or newer is required; this is bash %s\n' "${BASH_VERSION}" >&2
+  exit 1
+fi
 n_drift=0
 n_kept=0
 n_removed=0
@@ -234,11 +239,14 @@ fetch_tools_require() {
   if [[ -z "$from_dir" ]] && ! command -v curl >/dev/null && ! command -v wget >/dev/null; then
     die 'curl or wget is required'
   fi
+  if [[ -z "$from_dir" && "$base_url" != https://* ]]; then
+    die "SNIPSET_RELEASE_BASE_URL must start with https:// (got ${base_url}); use --from DIR for local files"
+  fi
   command -v sha256sum >/dev/null || command -v shasum >/dev/null || command -v openssl >/dev/null ||
     die 'sha256sum, shasum, or openssl is required'
 }
 fetch_get() {
-  local curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
+  local curl_opts=(--proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
   if command -v curl >/dev/null; then
     curl -fsSL "${curl_opts[@]}" "$1" -o "$2"
   else
@@ -246,7 +254,7 @@ fetch_get() {
   fi
 }
 fetch_text() {
-  local curl_opts=(--retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
+  local curl_opts=(--proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 60)
   if command -v curl >/dev/null; then
     curl -fsSL "${curl_opts[@]}" "$1"
   else
@@ -303,23 +311,25 @@ fetch_release() {
   fetch_get "${release_url}/${archive}" "${1}/${archive}"
 }
 binary_verify() {
-  local dir="$1" expected actual entry
+  local dir="$1" expected actual entry names verbose
   expected="$(awk -v name="$archive" '{ fname=$2; sub(/^[*]/, "", fname); if (fname == name) { print $1 } }' "${dir}/SHA256SUMS")"
   [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || die 'checksum entry missing'
   actual="$(sha256_of "${dir}/${archive}")"
   [[ "$actual" == "$expected" ]] || die 'checksum mismatch'
+  # Captured, not streamed: a tar that fails to list must stop the install, not read as an empty archive.
+  names="$(tar --quoting-style=escape -tzf "${dir}/${archive}")" || die 'cannot list the archive'
+  verbose="$(tar --quoting-style=escape -tvzf "${dir}/${archive}")" || die 'cannot list the archive'
   while IFS= read -r entry; do
     [[ "$entry" != *$'\n'* ]] || die 'unsafe archive entry'
     [[ "$entry" != -* && "$entry" != .-* && "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'unsafe archive entry'
-  done < <(tar --quoting-style=escape -tzf "${dir}/${archive}")
-  if tar -tvzf "${dir}/${archive}" | awk '$1 ~ /^l/ { found=1 } END { exit found ? 0 : 1 }'; then
-    die 'symlinks are not allowed in release archives'
-  fi
+  done <<< "$names"
+  [[ $'\n'"$verbose" != *$'\n'l* ]] || die 'symlinks are not allowed in release archives'
 }
 binary_stage() {
   mkdir -p "$install_dir"
   stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
-  tar -xzf "${1}/${archive}" -C "$stage"
+  # As root, tar would otherwise keep the packer's uid and mode bits.
+  tar --no-same-owner --no-same-permissions -xzf "${1}/${archive}" -C "$stage"
   [[ -f "${stage}/snipset" && -x "${stage}/snipset" ]] || { note 'archive has no executable snipset'; rm -rf "$stage"; exit 1; }
   chmod 755 "${stage}/snipset"
 }
