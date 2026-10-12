@@ -627,8 +627,8 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [x] T09 shims lifecycle. Evidence: nappy RED 9 fail, GREEN 9 pass (names with `/`, `.`, `..` and symlinks are kept); parent bundle 69 pass across six suites; commit `b62d734`.
   - [x] T10 zsh and fish PATH. Evidence: hoggy RED 13 fail, GREEN 14 pass; parent bundle 100 pass across eight suites; commit `b0859db`. Deviation accepted: the line also goes into a `--bashrc` file the shell block is about to create, so a second run adds nothing.
   - [x] T11 MCP six harnesses. Evidence: chef RED 11 fail, GREEN 11 pass; `claude mcp add/get/remove --help` read with a throwaway HOME and a read-only `claude mcp get` probe; parent bundle 111 pass across nine suites; `build.mjs --check --target sh` exit 0 afterwards; commit `ff07a9b`. Unverified: codex, gemini, VS Code output formats (CLIs absent) and gemini `--db` forwarding without `--`.
-  - [ ] T12 sh lifecycle modes
-  - [ ] T13 ps1 CLI contract
+  - [x] T12 sh lifecycle modes. Evidence: hoggy RED 7 fail, GREEN lifecycle 10 pass; amended mid-run (uninstall follows the `--with-mcp` list); parent regenerated `install.sh` and ran all eleven Linux suites: 136 pass, 1 fail, the fail being `install.ps1` drift from C14's uncommitted ps1 edits, not this chunk; one MCP assertion updated to exit 1 after `[FAIL]`; bundle shellcheck exit 0; commit `d46cc10`.
+  - [x] T13 ps1 CLI contract. Evidence: nappy RED 12 fail, GREEN 16 pass (a counter mutation turned its test red); parent regenerated `install.ps1`, reran cli and install ps1 suites (16 pass), `installer-build -t ps1` (5 pass), `install.Tests.ps1` passes; no `$script:` and no `exit` in the parts; commit `a89fd64`.
   - [ ] T14 ps1 platform, offline, smoke
   - [ ] T15 ps1 path and lifecycle
   - [ ] T16 ps1 MCP
@@ -641,7 +641,9 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] T23 README and docs
   - [ ] T24 real-asset run
   - [ ] T25 full local verification
-  - [ ] Review wave 1 (after W4): independent read-only review of the Linux parts; every P0/P1 fixed or recorded.
+  - [ ] Review wave 1 (after W4): independent read-only review of the Linux parts; every P0/P1 fixed or recorded. Findings in `docs/code-plan/sessions/2026-10-12-snipset-cli-install-coverage/review-wave-1.md`.
+  - [ ] C11b MCP scope-safe removal (fixes A3, A4, A6)
+  - [ ] C12b safe startup-file rewrites and keeps (fixes A1, A7 to A10)
   - [ ] Review wave 2 (after W6): independent read-only review of the Windows parts and the manifests.
   - [ ] Review wave 3 (before the PR): README claim check, lifecycle state machine, PR hygiene.
 - [ ] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0.

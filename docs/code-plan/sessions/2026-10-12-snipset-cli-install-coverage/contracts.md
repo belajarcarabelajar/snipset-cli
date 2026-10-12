@@ -265,3 +265,26 @@ RED: `timeout 120 bun test --timeout 60000 tests/install-ps1-mcp.test.mjs` exits
 - Tests: the path functions (`path entry` in each test name): add to an empty value, add to a value holding exactly one entry (regression: today's `$parts + $Dir` joins two strings into `C:\aC:\b`, measured in C03), add a duplicate differing in case or trailing backslash, keep `%USERPROFILE%\bin` verbatim, remove only the exact entry, remove from a value with empty segments. Lifecycle under pwsh on Linux with the test switch and `-From` a `fakeWindowsRelease`: install, `-Check` succeeds, `-Uninstall` removes `snipset.exe`, `-Check` fails, a second `-Uninstall` reports `removed 0`; `-DryRun` leaves the install dir and HOME snapshots identical.
 
 RED: `timeout 120 bun test --timeout 60000 tests/install-ps1-lifecycle.test.mjs` exits 1. GREEN: that file plus the other four ps1 suites exit 0.
+
+## Review wave 1 fixes
+
+Findings from reviewer A (removal safety, HEAD `ff07a9b`), each reproduced in a temp HOME: A1 P0 a failed `mktemp` in `pathenv.sh` empties `.profile` and `.bashrc` and still reports `[REMOVED]`; A2 P1 `--uninstall --dry-run` deletes (fixed in C12 by refusing it); A3 P1 Claude removal uses `--scope user` while the probe reads any scope, so a user-scope entry pointing elsewhere was deleted; A4 P2 the same for Gemini (derived); A5 P2 `--check` runs `claude mcp get`, which writes Claude's own state files; A6 P2 uninstall probes all six harnesses without `--with-mcp`; A7 P2 `--no-shell` uninstall deletes a user's share-dir files and `rmdir`s the dir; A8 P3 the unmarked legacy PATH line may be the user's own; A9 P3 a symlinked `snipset` is removed; A10 P3 `printf > "$bashrc"` truncates before a write that can fail.
+
+### C11b (fixes A3, A4, A5 documentation, A6), owner `nappy`
+
+`scripts/installer/sh/mcp.sh` and `tests/install-mcp.test.mjs` only.
+- `mcp_check` and `mcp_remove` act only on the ids in `mcp_list`; an empty list reports `[SKIP] mcp: no --with-mcp list` and calls no CLI (remove the scan-all-six default).
+- Claude: parse the `claude mcp get snipset` output; treat the entry as ours only when its `Scope:` line names the user config and its `Command:` line equals `$bin`; then `claude mcp remove --scope user snipset`. A local or project scope entry, or a user entry with another command, is `[KEEP] claude: <scope> entry left untouched`. `mcp_check` reports `[OK]` only for that same condition.
+- Gemini: decide scope from the user settings file, not from `gemini mcp list`: ours only when `${HOME}/.gemini/settings.json` holds an `mcpServers` entry named `snipset` whose command is `$bin` (text match on the `"snipset"` key and the `$bin` string); otherwise `[KEEP]`. Remove with `gemini mcp remove --scope user snipset`.
+- In `tests/install-mcp.test.mjs`: the test `a failing add reports its first stderr line and the loop continues` now expects exit 1 (C12 makes any `[FAIL]` exit 1); add: a Claude stub whose `get` prints a user-scope entry for another binary and a local-scope entry for `$bin` keeps both and calls no remove; a user-scope entry for `$bin` is removed; `--uninstall` without `--with-mcp` makes no CLI call (log empty); a Gemini stub plus a settings file decide removal as above.
+- RED: the new cases fail on HEAD's `mcp.sh`; GREEN: `tests/install-mcp.test.mjs` and `tests/install.test.mjs` exit 0 against a private bundle of HEAD plus your `mcp.sh`; `bash -n` and `shellcheck -S warning` exit 0.
+
+### C12b (fixes A1, A7, A8, A9, A10), owner `chef`, after C12 lands
+
+`scripts/installer/sh/lib.sh`, `pathenv.sh`, `shell.sh`, `binary.sh`, and their tests (`tests/install-pathenv.test.mjs`, `tests/install-shell.test.mjs`, `tests/install-binary.test.mjs`).
+- `lib.sh`: `rewrite_file FILE NEWFILE` replaces FILE's content with NEWFILE's while keeping FILE (and a symlink to it) in place: copy FILE to `FILE.snipset-bak.<pid>` beside it, `cat NEWFILE > FILE`, compare with `cmp`; on any failure restore from the backup with `cat`, keep the backup, return 2; on success delete the backup. Temp files for new content are created beside the target (`mktemp "${FILE}.snipset-new.XXXXXX"`), never in `TMPDIR`; a failed `mktemp` returns 2 before anything is touched.
+- Every startup-file rewrite in `pathenv.sh` and `shell.sh` uses it; a return of 2 reports `[FAIL] <item>: <file> left unchanged` (and the backup path when one remains), so the run exits 1.
+- `pathenv.sh`: the unmarked legacy `export PATH="<install_dir>:$PATH"` line is no longer removed: `[KEEP] path legacy line: <file>: remove it by hand if the old installer added it`.
+- `shell.sh`: `shell_remove` with `do_shell=0` reports `[SKIP] shell: --no-shell, nothing to remove` and deletes nothing; with `do_shell=1` it deletes only regular files (a symlink is `[KEEP]`).
+- `binary.sh`: a symlink at `<install_dir>/snipset` or `snipset-shims` is `[KEEP] ... symlink left in place`.
+- Tests: `TMPDIR` pointing at a missing dir and a read-only directory holding `.profile` each leave every startup file byte-identical, report `[FAIL]`, and exit 1; the legacy line survives with the hint; `--no-shell` uninstall leaves a user's `tab.sh` and the dir; a symlinked `snipset` survives uninstall.
