@@ -367,7 +367,8 @@ export function installerPath(target = "sh") {
   const override = target === "sh" ? process.env.SNIPSET_INSTALL_SCRIPT : process.env.SNIPSET_INSTALL_PS1;
   if (override) return override;
   const build = join(REPO_ROOT, "scripts", "installer", "build.mjs");
-  if (!existsSync(build)) return join(REPO_ROOT, `install.${target}`);
+  const order = join(REPO_ROOT, "scripts", "installer", target, "ORDER");
+  if (!existsSync(build) || !existsSync(order)) return join(REPO_ROOT, `install.${target}`);
   if (!builtInstallers.has(target)) {
     const out = mkdtempSync(join(tmpdir(), "snipset-installer-"));
     process.once("exit", () => rmSync(out, { recursive: true, force: true }));

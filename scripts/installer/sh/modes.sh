@@ -1,0 +1,1 @@
+# shellcheck shell=bash disable=SC2034,SC2154
