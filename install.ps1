@@ -248,10 +248,98 @@ function Install-SnipsetBinary {
     Write-SnipsetReport -Status SKIP -Item 'unblock' -Detail 'not a Windows host'
   }
 }
-function Add-SnipsetToUserPath {
+function Test-SnipsetPathEntrySame {
+  param([string]$Entry, [string]$Dir)
+  [string]::Equals($Entry.TrimEnd('\'), $Dir.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-SnipsetPathEntries {
+  param([string]$Raw)
+  "$Raw" -split ';' | Where-Object { $_ -ne '' }
+}
+
+function Test-SnipsetPathEntry {
+  param([string]$Raw, [string]$Dir)
+  @(Get-SnipsetPathEntries -Raw $Raw | Where-Object { Test-SnipsetPathEntrySame -Entry $_ -Dir $Dir }).Count -gt 0
+}
+
+function Add-SnipsetPathEntry {
+  param([string]$Raw, [string]$Dir)
+  # @() keeps a value holding one entry an array; without it, appending joins two strings (C:\aC:\b).
+  $parts = @(Get-SnipsetPathEntries -Raw $Raw)
+  if (-not (Test-SnipsetPathEntry -Raw $Raw -Dir $Dir)) { $parts += $Dir }
+  $parts -join ';'
+}
+
+function Remove-SnipsetPathEntry {
+  param([string]$Raw, [string]$Dir)
+  @(Get-SnipsetPathEntries -Raw $Raw | Where-Object { -not (Test-SnipsetPathEntrySame -Entry $_ -Dir $Dir) }) -join ';'
+}
+
+function Get-SnipsetUserPath {
+  if (-not (Test-SnipsetWindowsHost)) {
+    # Out-Host keeps the report line out of the value the caller assigns.
+    Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not a Windows host' | Out-Host
+    return $null
+  }
+  # The registry value, not [Environment]::GetEnvironmentVariable, so %USERPROFILE%-style entries stay unexpanded.
+  (Get-Item 'HKCU:\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+}
+
+function Set-SnipsetUserPath {
+  param([string]$Raw)
+  if (-not (Test-SnipsetWindowsHost)) {
+    Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not a Windows host'
+    return
+  }
+  Set-ItemProperty -Path 'HKCU:\Environment' -Name Path -Value $Raw -Type ExpandString
+  # Set-ItemProperty sends no WM_SETTINGCHANGE; SetEnvironmentVariable on a User variable does, so new shells see the PATH.
+  $probe = 'SNIPSET_INSTALL_PATH_BROADCAST'
+  [Environment]::SetEnvironmentVariable($probe, '1', 'User')
+  [Environment]::SetEnvironmentVariable($probe, $null, 'User')
+}
+
+function Install-SnipsetPathEnv {
   param([string]$Dir)
-  $parts = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ }
-  if ($parts -notcontains $Dir) { [Environment]::SetEnvironmentVariable('Path', (($parts + $Dir) -join ';'), 'User') }
+  if (-not (Test-SnipsetWindowsHost)) {
+    Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not a Windows host'
+    return
+  }
+  $raw = Get-SnipsetUserPath
+  if (Test-SnipsetPathEntry -Raw $raw -Dir $Dir) {
+    Write-SnipsetReport -Status OK -Item 'path' -Detail "$Dir is already on the user PATH"
+    return
+  }
+  Set-SnipsetUserPath -Raw (Add-SnipsetPathEntry -Raw $raw -Dir $Dir)
+  Write-SnipsetReport -Status ADD -Item 'path' -Detail "added $Dir to the user PATH; open a new terminal to use it"
+}
+
+function Test-SnipsetPathEnv {
+  param([string]$Dir)
+  if (-not (Test-SnipsetWindowsHost)) {
+    Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not a Windows host'
+    return
+  }
+  if (Test-SnipsetPathEntry -Raw (Get-SnipsetUserPath) -Dir $Dir) {
+    Write-SnipsetReport -Status OK -Item 'path' -Detail "$Dir is on the user PATH"
+  } else {
+    Write-SnipsetReport -Status MISSING -Item 'path' -Detail "$Dir is not on the user PATH"
+  }
+}
+
+function Remove-SnipsetPathEnv {
+  param([string]$Dir)
+  if (-not (Test-SnipsetWindowsHost)) {
+    Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not a Windows host'
+    return
+  }
+  $raw = Get-SnipsetUserPath
+  if (-not (Test-SnipsetPathEntry -Raw $raw -Dir $Dir)) {
+    Write-SnipsetReport -Status SKIP -Item 'path' -Detail "$Dir is not on the user PATH"
+    return
+  }
+  Set-SnipsetUserPath -Raw (Remove-SnipsetPathEntry -Raw $raw -Dir $Dir)
+  Write-SnipsetReport -Status REMOVED -Item 'path' -Detail "$Dir from the user PATH"
 }
 function Get-SnipsetMcpCliName {
   param([string]$Id)
@@ -530,44 +618,49 @@ function Remove-SnipsetMcp {
 # The called functions read these locals and the parameters through dynamic scoping, never a script-scope prefix:
 # the README one-liner runs install.ps1 as a scriptblock, where the script scope is the caller's session.
 
-# Placeholders for functions that parts earlier in ORDER will define; an existing definition wins.
-if (-not (Get-Command Assert-SnipsetPlatform -ErrorAction SilentlyContinue)) {
-  function Assert-SnipsetPlatform {}
-}
-if (-not (Get-Command Install-SnipsetMcp -ErrorAction SilentlyContinue)) {
-  function Install-SnipsetMcp {
-    param([string[]]$Ids, [string]$Bin, [string]$Db)
-    foreach ($id in $Ids) { Write-SnipsetReport -Status SKIP -Item $id -Detail 'not registered yet' }
+function Test-SnipsetExe {
+  param([string]$InstallDir)
+  $exe = Join-Path $InstallDir 'snipset.exe'
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    Write-SnipsetReport -Status MISSING -Item 'binary' -Detail "$exe not found"
+    return
   }
-}
-if (-not (Get-Command Test-SnipsetMcp -ErrorAction SilentlyContinue)) {
-  function Test-SnipsetMcp {
-    param([string[]]$Ids, [string]$Bin)
-    foreach ($id in $Ids) { Write-SnipsetReport -Status SKIP -Item $id -Detail 'not checked yet' }
+  if (-not (Test-SnipsetWindowsHost)) {
+    Write-SnipsetReport -Status OK -Item 'binary' -Detail "$exe (version not checked off Windows)"
+    return
   }
-}
-if (-not (Get-Command Remove-SnipsetMcp -ErrorAction SilentlyContinue)) {
-  function Remove-SnipsetMcp {
-    param([string[]]$Ids, [string]$Bin)
-    Write-SnipsetReport -Status SKIP -Item 'mcp' -Detail 'not removed yet'
+  $have = Get-SnipsetInstalledVersion -InstallDir $InstallDir
+  $want = $Version -replace '^v', ''
+  if (-not $have) {
+    Write-SnipsetReport -Status DRIFT -Item 'binary' -Detail "$exe does not answer --version as snipset"
+  } elseif ($want -and $have -ne $want) {
+    Write-SnipsetReport -Status DRIFT -Item 'binary' -Detail "snipset $have at $exe, expected $want"
+  } else {
+    Write-SnipsetReport -Status OK -Item 'binary' -Detail "snipset $have at $exe"
   }
 }
 
-function Test-SnipsetExe {
-  param([string]$InstallDir)
-  Write-SnipsetReport -Status SKIP -Item 'binary' -Detail 'not checked yet'
-}
-function Test-SnipsetPathEnv {
-  param([string]$Dir)
-  Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not checked yet'
-}
 function Remove-SnipsetExe {
   param([string]$InstallDir)
-  Write-SnipsetReport -Status SKIP -Item 'binary' -Detail 'not removed yet'
-}
-function Remove-SnipsetPathEnv {
-  param([string]$Dir)
-  Write-SnipsetReport -Status SKIP -Item 'path' -Detail 'not removed yet'
+  $exe = Join-Path $InstallDir 'snipset.exe'
+  $item = Get-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue
+  if (-not $item) {
+    Write-SnipsetReport -Status SKIP -Item 'binary' -Detail "$exe not found"
+    return
+  }
+  if (Test-SnipsetWindowsHost) {
+    $ours = Test-SnipsetBinary -Path $exe
+    $why = 'does not answer --version as snipset'
+  } else {
+    $ours = (-not $item.PSIsContainer) -and (-not $item.LinkType)
+    $why = 'is not a regular file'
+  }
+  if (-not $ours) {
+    Write-SnipsetReport -Status KEEP -Item 'binary' -Detail "$exe $why; left in place"
+    return
+  }
+  Remove-Item -LiteralPath $exe -Force
+  Write-SnipsetReport -Status REMOVED -Item 'binary' -Detail $exe
 }
 
 function Invoke-SnipsetInstall {
@@ -579,14 +672,15 @@ function Invoke-SnipsetInstall {
   $exe = Join-Path $InstallDir 'snipset.exe'
   $temp = Join-Path ([IO.Path]::GetTempPath()) ('snipset-install-' + [Guid]::NewGuid().ToString('N'))
   $stage = Join-Path $InstallDir ('.snipset-stage-' + [Guid]::NewGuid().ToString('N'))
+  $fetch = if ($From) { "copy SHA256SUMS and $archive from $From" } else { "download SHA256SUMS and $archive from $releaseUrl" }
   try {
-    Invoke-SnipsetAction -Description "download SHA256SUMS and $archive from $releaseUrl and verify the checksum" -Action {
+    Invoke-SnipsetAction -Description "$fetch and verify the checksum" -Action {
       New-Item -ItemType Directory -Force -Path $temp | Out-Null
       $run.zip = Get-SnipsetRelease -Temp $temp
     }
     Invoke-SnipsetAction -Description "check the entries of $archive" -Action { Test-SnipsetArchive -Zip $run.zip }
     Invoke-SnipsetAction -Description "install snipset.exe to $exe" -Action { Install-SnipsetBinary -Zip $run.zip -Stage $stage -InstallDir $InstallDir }
-    if ($AddPath) { Invoke-SnipsetAction -Description "add $InstallDir to the user PATH" -Action { Add-SnipsetToUserPath -Dir $InstallDir } }
+    if ($AddPath) { Invoke-SnipsetAction -Description "add $InstallDir to the user PATH" -Action { Install-SnipsetPathEnv -Dir $InstallDir } }
     foreach ($id in $McpIds) { Invoke-SnipsetAction -Description "register the snipset MCP server for $id" -Action { Install-SnipsetMcp -Ids @($id) -Bin $exe } }
     if ($run.fail -gt 0) { throw "install: $($run.fail) steps failed" }
     if ($DryRun) { Write-Output 'dry run: nothing was written' } else { Write-Output "Installed snipset $Version to $exe" }
@@ -601,27 +695,48 @@ function Invoke-SnipsetCheck {
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }
   Test-SnipsetExe -InstallDir $InstallDir
   if ($AddPath) { Test-SnipsetPathEnv -Dir $InstallDir }
-  if ($McpIds.Count) { Test-SnipsetMcp -Ids $McpIds -Bin (Join-Path $InstallDir 'snipset.exe') }
-  if ($run.drift -gt 0) { throw "check: DRIFT ($($run.drift) items)" }
+  if ($McpIds.Count) {
+    Test-SnipsetMcp -Ids $McpIds -Bin (Join-Path $InstallDir 'snipset.exe')
+  } else {
+    Write-SnipsetReport -Status SKIP -Item 'mcp' -Detail 'no -WithMcp list'
+  }
+  # A check that could not run is not evidence of a current install.
+  $n = $run.drift + $run.fail
+  if ($n -gt 0) { throw "check: DRIFT ($n items)" }
   Write-Output 'check: CURRENT'
 }
 
 function Invoke-SnipsetUpdate {
   param([string[]]$McpIds = @())
+  if ($DryRun) {
+    Invoke-SnipsetInstall -McpIds $McpIds
+    return
+  }
+  # Invoke-SnipsetInstall resolves again, sees this local, and so asks GitHub at most once.
+  $Version = Resolve-SnipsetVersion
+  $have = Get-SnipsetInstalledVersion -InstallDir $InstallDir
+  if ($have -and $have -eq ($Version -replace '^v', '')) {
+    Write-SnipsetReport -Status OK -Item 'update' -Detail "snipset $have is current"
+    return
+  }
   Invoke-SnipsetInstall -McpIds $McpIds
 }
 
 function Invoke-SnipsetUninstall {
   param([string[]]$McpIds = @())
+  # The remove functions delete for real, so there is nothing safe to preview.
+  if ($DryRun) { throw 'install.ps1: -DryRun cannot preview -Uninstall; run -Check to see what is installed' }
   $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }
   $exe = Join-Path $InstallDir 'snipset.exe'
-  $mcpLabel = if ($McpIds.Count) { $McpIds -join ', ' } else { 'every harness' }
-  Invoke-SnipsetAction -Description "remove the snipset MCP entries for $mcpLabel" -Action { Remove-SnipsetMcp -Ids $McpIds -Bin $exe }
-  Invoke-SnipsetAction -Description "remove $InstallDir from the user PATH" -Action { Remove-SnipsetPathEnv -Dir $InstallDir }
-  Invoke-SnipsetAction -Description "remove $exe" -Action { Remove-SnipsetExe -InstallDir $InstallDir }
+  if ($McpIds.Count) {
+    Remove-SnipsetMcp -Ids $McpIds -Bin $exe
+  } else {
+    Write-SnipsetReport -Status SKIP -Item 'mcp' -Detail 'no -WithMcp list'
+  }
+  Remove-SnipsetPathEnv -Dir $InstallDir
+  Remove-SnipsetExe -InstallDir $InstallDir
   Write-Output "uninstall: removed $($run.removed), kept $($run.kept)"
   if ($run.fail -gt 0) { throw "uninstall: $($run.fail) steps failed" }
-  if ($DryRun) { Write-Output 'dry run: nothing was written' }
 }
 $mode = Get-SnipsetMode -Check:$Check -Update:$Update -Uninstall:$Uninstall
 $mcpIds = Resolve-SnipsetMcpIds -WithMcp $WithMcp
