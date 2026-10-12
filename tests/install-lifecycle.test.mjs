@@ -311,7 +311,7 @@ test("a failed MCP registration makes install and uninstall exit 1", async () =>
   stubCommand(
     sb,
     "claude",
-    `[ "$2" = get ] && { printf '  Command: %s\\n' ${JSON.stringify(bin)}; exit 0; }\necho "remove refused" >&2\nexit 1\n`,
+    `[ "$2" = get ] && { printf '  Scope: User config (available in all your projects)\\n  Command: %s\\n' ${JSON.stringify(bin)}; exit 0; }\necho "remove refused" >&2\nexit 1\n`,
   );
   const uninstall = await run(sb, ["--uninstall", "--no-init", "--no-shims", "--with-mcp=claude"]);
   assert.equal(uninstall.code, 1, uninstall.stdout + uninstall.stderr);
