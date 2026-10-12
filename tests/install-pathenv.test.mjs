@@ -1,0 +1,233 @@
+import test, { afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  cleanupSandbox,
+  diffSnapshots,
+  downloaderShims,
+  fakeLinuxRelease,
+  makeSandbox,
+  runInstaller,
+  snapshotTree,
+  stubCommand,
+} from "./helpers/install-sandbox.mjs";
+
+const MARK = "# snipset-path (managed by snipset installer; safe to remove)";
+const QUIET = ["--add-path", "--no-shell", "--no-init", "--no-shims"];
+
+const envText = (dir) =>
+  `${MARK}\ncase ":\${PATH}:" in\n  *":${dir}:"*) ;;\n  *) export PATH="${dir}:$PATH" ;;\nesac\n`;
+const fishEnvText = (dir) =>
+  `${MARK}\nif not contains -- "${dir}" $PATH\n    set -gx PATH "${dir}" $PATH\nend\n`;
+const sourceLine = (share) => `. "${share}/env" ${MARK}`;
+const fishConfText = (share) => `${MARK}\nsource "${share}/env.fish"\n`;
+
+const cleanups = [];
+afterEach(async () => {
+  while (cleanups.length) await cleanups.pop()();
+});
+
+function setup() {
+  const sb = makeSandbox();
+  cleanups.push(() => cleanupSandbox(sb));
+  const release = fakeLinuxRelease();
+  cleanups.push(() => rm(release.dir, { recursive: true, force: true }));
+  downloaderShims(sb, release);
+  sb.installDir = join(sb.home, ".local", "bin");
+  sb.share = join(sb.home, ".local", "share", "snipset");
+  sb.at = (...parts) => join(sb.home, ...parts);
+  return sb;
+}
+
+function seed(path, content) {
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, content);
+}
+
+function read(path) {
+  return readFileSync(path, "utf8");
+}
+
+function countLine(path, line) {
+  return read(path).split("\n").filter((l) => l === line).length;
+}
+
+async function ok(sb, args, env) {
+  const result = await runInstaller(sb, args, { env });
+  assert.equal(result.code, 0, `${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  return result;
+}
+
+const STARTUP = [".profile", ".bashrc", ".bash_profile", ".bash_login", ".zshenv"];
+
+test("bash only: env files, ~/.profile, and existing bash files get the source line", async () => {
+  const sb = setup();
+  seed(sb.at(".bashrc"), "user bashrc\n");
+  seed(sb.at(".bash_profile"), "user bash_profile\n");
+  await ok(sb, QUIET);
+  assert.equal(read(join(sb.share, "env")), envText(sb.installDir));
+  assert.equal(read(join(sb.share, "env.fish")), fishEnvText(sb.installDir));
+  for (const name of [".profile", ".bashrc", ".bash_profile"]) {
+    assert.equal(countLine(sb.at(name), sourceLine(sb.share)), 1, name);
+  }
+  assert.equal(read(sb.at(".bashrc")), `user bashrc\n\n${sourceLine(sb.share)}\n`);
+  assert.equal(existsSync(sb.at(".bash_login")), false);
+  assert.equal(existsSync(sb.at(".zshenv")), false);
+  assert.equal(existsSync(sb.at(".config", "fish")), false);
+  const env = join(sb.share, "env");
+  const path = execFileSync("/bin/sh", ["-c", `. "${env}"; . "${env}"; printf %s "$PATH"`], {
+    env: { PATH: "/usr/bin" },
+    encoding: "utf8",
+  });
+  assert.equal(path, `${sb.installDir}:/usr/bin`);
+});
+
+test("zsh as the login shell gets ~/.zshenv", async () => {
+  const sb = setup();
+  await ok(sb, QUIET, { SHELL: "/usr/bin/zsh" });
+  assert.equal(read(sb.at(".zshenv")), `\n${sourceLine(sb.share)}\n`);
+  assert.equal(existsSync(sb.at(".config", "fish")), false);
+});
+
+test("zsh on PATH gets ~/.zshenv", async () => {
+  const sb = setup();
+  stubCommand(sb, "zsh", "exit 0\n");
+  await ok(sb, QUIET);
+  assert.equal(countLine(sb.at(".zshenv"), sourceLine(sb.share)), 1);
+});
+
+test("fish on PATH gets conf.d/snipset.fish", async () => {
+  const sb = setup();
+  stubCommand(sb, "fish", "exit 0\n");
+  await ok(sb, QUIET);
+  assert.equal(read(sb.at(".config", "fish", "conf.d", "snipset.fish")), fishConfText(sb.share));
+  assert.equal(existsSync(sb.at(".zshenv")), false);
+});
+
+test("ZDOTDIR moves the zsh file", async () => {
+  const sb = setup();
+  const zdot = sb.at("zdot");
+  await ok(sb, QUIET, { SHELL: "/bin/zsh", ZDOTDIR: zdot });
+  assert.equal(countLine(join(zdot, ".zshenv"), sourceLine(sb.share)), 1);
+  assert.equal(existsSync(sb.at(".zshenv")), false);
+});
+
+test("XDG_CONFIG_HOME moves the fish file", async () => {
+  const sb = setup();
+  const xdg = sb.at("xdg");
+  await ok(sb, QUIET, { SHELL: "/usr/bin/fish", XDG_CONFIG_HOME: xdg });
+  assert.equal(read(join(xdg, "fish", "conf.d", "snipset.fish")), fishConfText(sb.share));
+  assert.equal(existsSync(sb.at(".config")), false);
+});
+
+test("a second install adds nothing", async () => {
+  const sb = setup();
+  stubCommand(sb, "zsh", "exit 0\n");
+  stubCommand(sb, "fish", "exit 0\n");
+  seed(sb.at(".bashrc"), "user bashrc\n");
+  await ok(sb, QUIET);
+  const first = snapshotTree(sb.home);
+  await ok(sb, QUIET);
+  assert.deepEqual(diffSnapshots(first, snapshotTree(sb.home)), []);
+  for (const name of [".profile", ".bashrc", ".zshenv"]) {
+    assert.equal(countLine(sb.at(name), sourceLine(sb.share)), 1, name);
+  }
+});
+
+test("a fresh HOME with shell integration converges after one install", async () => {
+  const sb = setup();
+  const flags = ["--add-path", "--no-init", "--no-shims"];
+  await ok(sb, flags);
+  assert.equal(countLine(sb.at(".bashrc"), sourceLine(sb.share)), 1);
+  const first = snapshotTree(sb.home);
+  await ok(sb, flags);
+  assert.deepEqual(diffSnapshots(first, snapshotTree(sb.home)), []);
+  const check = await runInstaller(sb, ["--check", ...flags]);
+  assert.doesNotMatch(check.stdout, /^\[(MISSING|DRIFT)\] path/m, check.stdout);
+});
+
+test("check reports OK after install and MISSING after a line is deleted", async () => {
+  const sb = setup();
+  stubCommand(sb, "zsh", "exit 0\n");
+  seed(sb.at(".bashrc"), "user bashrc\n");
+  await ok(sb, QUIET);
+  const good = await runInstaller(sb, ["--check", ...QUIET]);
+  assert.equal(good.code, 0, good.stdout + good.stderr);
+  for (const file of [sb.at(".profile"), sb.at(".bashrc"), sb.at(".zshenv")]) {
+    assert.ok(good.stdout.includes(`[OK] path line: ${file}\n`), good.stdout);
+  }
+  assert.ok(good.stdout.includes(`[OK] path env: ${join(sb.share, "env")}\n`), good.stdout);
+  const zshenv = sb.at(".zshenv");
+  writeFileSync(zshenv, read(zshenv).replace(`${sourceLine(sb.share)}\n`, ""));
+  const bad = await runInstaller(sb, ["--check", ...QUIET]);
+  assert.equal(bad.code, 1, bad.stdout + bad.stderr);
+  assert.ok(bad.stdout.includes(`[MISSING] path line: ${zshenv}\n`), bad.stdout);
+  assert.ok(bad.stdout.includes(`[OK] path line: ${sb.at(".profile")}\n`), bad.stdout);
+});
+
+test("an edited env file is DRIFT on check and kept on uninstall", async () => {
+  const sb = setup();
+  await ok(sb, QUIET);
+  const env = join(sb.share, "env");
+  writeFileSync(env, `${read(env)}export EXTRA=1\n`);
+  const check = await runInstaller(sb, ["--check", ...QUIET]);
+  assert.equal(check.code, 1);
+  assert.match(check.stdout, /^\[DRIFT\] path env: .*\/env\b/m, check.stdout);
+  const out = await ok(sb, ["--uninstall", ...QUIET]);
+  assert.match(out.stdout, /^\[KEEP\] path env: /m, out.stdout);
+  assert.ok(read(env).endsWith("export EXTRA=1\n"));
+  assert.equal(existsSync(join(sb.share, "env.fish")), false);
+});
+
+test("uninstall leaves every startup file as it was before the install", async () => {
+  const sb = setup();
+  stubCommand(sb, "zsh", "exit 0\n");
+  stubCommand(sb, "fish", "exit 0\n");
+  for (const name of STARTUP) seed(sb.at(name), `# user ${name} top\nexport USER_${name.slice(1).replace(/\W/g, "_")}=1\n`);
+  seed(sb.at(".config", "fish", "conf.d", "user.fish"), "set -gx USER_FISH 1\n");
+  const outsideLocal = (tree) => tree.filter((entry) => !entry.path.startsWith(".local"));
+  const before = outsideLocal(snapshotTree(sb.home));
+  await ok(sb, QUIET);
+  for (const name of STARTUP) assert.equal(countLine(sb.at(name), sourceLine(sb.share)), 1, name);
+  assert.ok(existsSync(sb.at(".config", "fish", "conf.d", "snipset.fish")));
+  const out = await ok(sb, ["--uninstall", ...QUIET]);
+  assert.deepEqual(diffSnapshots(before, outsideLocal(snapshotTree(sb.home))), [], out.stdout);
+  assert.equal(existsSync(sb.share), false, out.stdout);
+});
+
+test("uninstall removes the legacy ~/.profile line from the previous installer", async () => {
+  const sb = setup();
+  const legacy = `export PATH="${sb.installDir}:$PATH"`;
+  seed(sb.at(".profile"), `user profile\n\n${legacy}\nuser tail\n`);
+  const out = await ok(sb, ["--uninstall", ...QUIET]);
+  assert.equal(read(sb.at(".profile")), "user profile\nuser tail\n", out.stdout);
+  assert.match(out.stdout, /^\[REMOVED\] path legacy line: /m);
+});
+
+test("a symlinked ~/.profile stays a symlink", async () => {
+  const sb = setup();
+  const target = sb.at("dotfiles", "profile");
+  seed(target, "user profile\n");
+  symlinkSync(target, sb.at(".profile"));
+  await ok(sb, QUIET);
+  assert.ok(lstatSync(sb.at(".profile")).isSymbolicLink());
+  assert.equal(countLine(target, sourceLine(sb.share)), 1);
+  await ok(sb, ["--uninstall", ...QUIET]);
+  assert.ok(lstatSync(sb.at(".profile")).isSymbolicLink());
+  assert.equal(read(target), "user profile\n");
+});
+
+test("without --add-path nothing is written", async () => {
+  const sb = setup();
+  stubCommand(sb, "zsh", "exit 0\n");
+  stubCommand(sb, "fish", "exit 0\n");
+  seed(sb.at(".bashrc"), "user bashrc\n");
+  await ok(sb, ["--no-shell", "--no-init", "--no-shims"]);
+  assert.equal(read(sb.at(".bashrc")), "user bashrc\n");
+  for (const name of [".profile", ".zshenv", ".config", join(".local", "share", "snipset")]) {
+    assert.equal(existsSync(sb.at(name)), false, name);
+  }
+});
