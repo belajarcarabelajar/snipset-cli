@@ -80,7 +80,8 @@ dirs_record_present() {
   [[ -e "${install_dir}/.snipset-dirs" || -L "${install_dir}/.snipset-dirs" ]]
 }
 # Adds each PATH not yet listed to the install dir's .snipset-dirs record. The old lines
-# are kept, and the new record replaces the file, so a symlink there is not followed.
+# are kept, and the new record replaces the file with mv -T, so a symlink there (even one to a
+# directory) is not followed and a real directory makes mv fail.
 dirs_record_add() {
   local rec="${install_dir}/.snipset-dirs" old="" text path new=""
   if [[ -f "$rec" && ! -L "$rec" ]]; then
@@ -102,7 +103,7 @@ dirs_record_add() {
   done
   # An empty record still marks an install made by this installer.
   [[ "$text" != "$old" || -L "$rec" || ! -e "$rec" ]] || return 0
-  if new="$(mktemp "${rec}.XXXXXX" 2>/dev/null)" && printf '%s' "$text" > "$new" && mv -f -- "$new" "$rec"; then
+  if new="$(mktemp "${rec}.XXXXXX" 2>/dev/null)" && printf '%s' "$text" > "$new" && mv -fT -- "$new" "$rec"; then
     return 0
   fi
   [[ -z "$new" ]] || rm -f -- "$new"
@@ -749,10 +750,11 @@ shell_ownership() {
     shell_why=changed
   fi
 }
-# Replaces the manifest instead of writing through it, so a symlink there is not followed.
+# Replaces the manifest instead of writing through it: with -T a symlink there (even one to a
+# directory) is replaced, and a real directory makes mv fail instead of receiving the file.
 shell_manifest_write() {
   local manifest="${share_dir}/.snipset-bundle" new
-  if new="$(mktemp "${manifest}.XXXXXX" 2>/dev/null)" && printf '%s' "$1" > "$new" && mv -f -- "$new" "$manifest"; then
+  if new="$(mktemp "${manifest}.XXXXXX" 2>/dev/null)" && printf '%s' "$1" > "$new" && mv -fT -- "$new" "$manifest"; then
     return 0
   fi
   [[ -z "${new:-}" ]] || rm -f -- "$new"

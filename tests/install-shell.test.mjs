@@ -401,3 +401,22 @@ test("share dir manifest: a custom share dir without a manifest is adopted when 
   assert.ok(existsSync(join(share, MANIFEST)), "manifest not written");
   assert.ok(readFileSync(join(sb.home, ".bashrc"), "utf8").includes(MARKER), "block missing");
 });
+
+test("share dir manifest: a .snipset-bundle linked to a directory is replaced, not written into", async () => {
+  const { sb, shareDir } = setup();
+  const userDir = join(sb.home, "userdir");
+  mkdirSync(userDir);
+  mkdirSync(shareDir, { recursive: true });
+  symlinkSync(userDir, join(shareDir, MANIFEST));
+  const res = await install(sb);
+  assert.deepEqual(readdirSync(userDir), [], `the manifest went into the linked directory:\n${res.stdout}`);
+  assert.ok(lstatSync(join(shareDir, MANIFEST)).isFile(), "the manifest is not a regular file");
+});
+
+test("share dir manifest: a directory at .snipset-bundle is reported and never written into", async () => {
+  const { sb, shareDir } = setup();
+  mkdirSync(join(shareDir, MANIFEST), { recursive: true });
+  const res = await runInstaller(sb, FLAGS);
+  assert.deepEqual(readdirSync(join(shareDir, MANIFEST)), [], `a file went into the directory:\n${res.stdout}`);
+  assert.match(res.stdout, /^\[FAIL\] shell manifest: /m, res.stdout);
+});

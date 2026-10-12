@@ -234,6 +234,12 @@ describe("deferred hardening notes", () => {
     expect(section("Known limits")).not.toContain("Uninstall may leave empty directories (for example `~/.local/bin`");
   });
 
+  test("deferred hardening: the default share dir exception for older installs is stated", () => {
+    const text = section("Check, update, uninstall, dry run");
+    expect(text).toContain("a default share dir (`~/.local/share/snipset`) with no `.snipset-bundle` is taken as an older install");
+    expect(text).toContain("except the default share dir an older install left");
+  });
+
   test("deferred hardening: in-use asides on Windows are cleaned up", () => {
     const text = section("Windows x64");
     expect(text).toContain("`snipset.exe.old-<pid>-<8 hex>`");

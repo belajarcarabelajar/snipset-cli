@@ -93,8 +93,9 @@ Rules:
 - `--check` and `--uninstall` look only where you point them. Pass the same `--install-dir`, `--share-dir`, `--bashrc`, `--db`, and `--with-mcp` flags you used for the install. `--check` also needs `--add-path` to check PATH.
 - `--dry-run --uninstall` is refused, because the remove steps cannot be previewed. Run `--check` to see what is installed.
 - The database is never removed.
-- Uninstall removes the directories the install created, deepest first, when they are empty. The install records them in `<install-dir>/.snipset-dirs`. A directory that existed before the install, or that still holds a file, stays. Directories made by an installer older than this record are not in it and can stay behind empty.
+- Uninstall removes the directories the install created, deepest first, when they are empty. The install records them in `<install-dir>/.snipset-dirs`. A directory that existed before the install, or that still holds a file, stays, except the default share dir an older install left (next rule). Other directories made by an installer older than this record are not in it and can stay behind empty.
 - The installer tracks the shell files it writes in `<share-dir>/.snipset-bundle`. A `snipset.sh`, `completion.bash`, or `tab.sh` there that it did not write, or that you edited, is kept: install and uninstall print `[KEEP]`, and the bashrc block is not added while one is kept, because it would source that file at every login. Delete the file to let the installer manage it again.
+- Installs older than the manifest: a default share dir (`~/.local/share/snipset`) with no `.snipset-bundle` is taken as an older install, so its `snipset.sh`, `completion.bash`, and `tab.sh` are replaced as before, and uninstall removes the directory once it is empty. Keep files of your own under those names in a custom `--share-dir`.
 
 ```sh
 bash install-snipset.sh --check --add-path --with-mcp=claude,opencode
