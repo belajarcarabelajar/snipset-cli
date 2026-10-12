@@ -1,0 +1,4 @@
+{
+  "outputs": [{ "template": "snipset.rb.tmpl", "out": "Formula/snipset.rb" }],
+  "owns": "Formula"
+}
