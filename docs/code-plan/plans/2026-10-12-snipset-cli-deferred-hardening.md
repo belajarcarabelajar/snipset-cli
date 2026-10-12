@@ -332,7 +332,7 @@ Rules for every chunk (carried from the install-coverage contracts and `MEMORY.m
 - [ ] T02 L1 share-dir manifest
 - [ ] T03 L2 created-dirs record
 - [ ] T04 L3 stdin pipe test
-- [ ] T05 L4 legacy env scrub
+- [x] T05 L4 legacy env scrub. Evidence: RED `-t 'legacy env is scrubbed'` exit 1 (13 caller PATH entries leaked, `~/.local/bin` twice); GREEN `tests/install.test.mjs` exit 0, 15 pass (the 14 names unchanged, sorted diff adds only the new one). Parent integration added `getconf`, `ldd`, `timeout` to the linked tools so the legacy tests keep the normal glibc check and the bounded smoke run (the chunk's default set took the fallback path).
 - [ ] T06 L7 `-Db`
 - [ ] T07 L10 old-exe cleanup and W1 DLL message
 - [ ] T08 README notes
