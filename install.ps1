@@ -115,9 +115,62 @@ function Resolve-SnipsetInstallDir {
   Join-Path $env:LOCALAPPDATA 'Snipset\bin'
 }
 $target = 'x86_64-pc-windows-msvc'
+
+function Test-SnipsetWindowsHost {
+  # Windows PowerShell 5.1 has no $IsWindows and runs only on Windows; pwsh 7 defines it on every OS,
+  # so OS=Windows_NT set by hand on Linux must not count.
+  if ($null -ne $IsWindows) { return [bool]$IsWindows }
+  $env:OS -eq 'Windows_NT'
+}
+
+function Get-SnipsetArchDecision {
+  param([string]$Arch, [string]$Wow, [int]$Build)
+  # A 32-bit process sees x86 in PROCESSOR_ARCHITECTURE and the real CPU in PROCESSOR_ARCHITEW6432.
+  $effective = if ($Wow) { $Wow } else { $Arch }
+  if ($effective -eq 'AMD64') { return 'ok' }
+  if ($effective -eq 'ARM64') {
+    # Windows 11 (build 22000) emulates x64 on Arm; Windows 10 on Arm emulates x86 only.
+    if ($Build -ge 22000) { return 'ok-emulated' }
+    return 'refuse:Windows 10 on Arm cannot run the x64 build; use Windows 11'
+  }
+  "refuse:unsupported CPU $(if ($effective) { $effective } else { 'unknown' })"
+}
+
+function Assert-SnipsetPlatform {
+  param(
+    [string]$Arch = $env:PROCESSOR_ARCHITECTURE,
+    [string]$Wow = $env:PROCESSOR_ARCHITEW6432,
+    [int]$Build = [Environment]::OSVersion.Version.Build
+  )
+  if (-not (Test-SnipsetWindowsHost)) {
+    if ($env:SNIPSET_INSTALL_ALLOW_NON_WINDOWS -eq '1') {
+      Write-SnipsetReport -Status SKIP -Item 'platform' -Detail 'non-Windows host (test switch)'
+      return
+    }
+    throw 'install.ps1 installs the Windows build; on Linux use install.sh'
+  }
+  $cpu = if ($Wow) { $Wow } else { $Arch }
+  $decision = Get-SnipsetArchDecision -Arch $Arch -Wow $Wow -Build $Build
+  if ($decision -like 'refuse:*') { throw "install.ps1: $($decision.Substring('refuse:'.Length))" }
+  if ($decision -eq 'ok-emulated') {
+    Write-SnipsetReport -Status NOTE -Item 'platform' -Detail "Windows $cpu build $Build runs the x64 build under emulation"
+  } else {
+    Write-SnipsetReport -Status OK -Item 'platform' -Detail "Windows $cpu build $Build"
+  }
+}
+function Get-SnipsetFromVersion {
+  param([string]$From)
+  $sums = Join-Path $From 'SHA256SUMS'
+  if (-not (Test-Path -LiteralPath $sums -PathType Leaf)) { throw "install.ps1: $sums is missing" }
+  $pattern = '^[0-9a-fA-F]{64}\s+snipset-cli-(v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?)-' + [regex]::Escape($target) + '\.zip$'
+  $found = @(Get-Content -LiteralPath $sums | ForEach-Object { if ($_ -match $pattern) { $Matches[1] } } | Sort-Object -Unique)
+  if ($found.Count -ne 1) { throw "install.ps1: expected one snipset-cli-v<VERSION>-$target.zip in $sums, found $($found.Count); pass -Version" }
+  $found[0]
+}
 function Resolve-SnipsetVersion {
   if ($Version -and $Version -notmatch '^v?\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: invalid version' }
   if ($Version -and $Version -notlike 'v*') { $Version = "v$Version" }
+  if (-not $Version -and $From) { $Version = Get-SnipsetFromVersion -From $From }
   if (-not $Version) { $Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest").tag_name }
   if ($Version -notmatch '^v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: release version was not found' }
   $Version
@@ -126,8 +179,16 @@ function Get-SnipsetRelease {
   param([string]$Temp)
   $sums = Join-Path $temp 'SHA256SUMS'
   $zip = Join-Path $temp $archive
-  Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/SHA256SUMS" -OutFile $sums
-  Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/$archive" -OutFile $zip
+  if ($From) {
+    foreach ($name in 'SHA256SUMS', $archive) {
+      $source = Join-Path $From $name
+      if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "install.ps1: $source is missing" }
+      Copy-Item -LiteralPath $source -Destination (Join-Path $temp $name)
+    }
+  } else {
+    Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/SHA256SUMS" -OutFile $sums
+    Invoke-WebRequest -UseBasicParsing -Uri "$releaseUrl/$archive" -OutFile $zip
+  }
   $line = Get-Content $sums | Where-Object { $_ -match "\s$([regex]::Escape($archive))$" } | Select-Object -First 1
   if (-not $line -or $line -notmatch '^([0-9a-fA-F]{64})\s+') { throw 'install.ps1: checksum entry missing' }
   $expected = $Matches[1].ToLowerInvariant()
@@ -148,14 +209,44 @@ function Test-SnipsetArchive {
     $zipArchive.Dispose()
   }
 }
+function Test-SnipsetBinary {
+  param([string]$Path)
+  # Windows PowerShell 5.1 turns native stderr into a terminating error under 'Stop'; this scope only.
+  $ErrorActionPreference = 'Continue'
+  try { $out = @(& $Path --version 2>$null) } catch { return $false }
+  ($LASTEXITCODE -eq 0) -and (($out -join "`n").StartsWith('snipset '))
+}
+function Get-SnipsetInstalledVersion {
+  param([string]$InstallDir)
+  if (-not (Test-SnipsetWindowsHost)) { return $null }
+  $exe = Join-Path $InstallDir 'snipset.exe'
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { return $null }
+  $ErrorActionPreference = 'Continue'
+  try { $out = @(& $exe --version 2>$null) } catch { return $null }
+  if ($LASTEXITCODE -eq 0 -and ($out -join "`n") -match '^snipset v?(\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?)') { return $Matches[1] }
+  $null
+}
 function Install-SnipsetBinary {
   param([string]$Zip, [string]$Stage, [string]$InstallDir)
   New-Item -ItemType Directory -Force -Path $stage | Out-Null
   Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
   $candidate = Join-Path $stage 'snipset.exe'
   if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'install.ps1: archive has no snipset.exe' }
+  $windows = Test-SnipsetWindowsHost
+  if ($windows) {
+    if (-not (Test-SnipsetBinary -Path $candidate)) { throw 'install.ps1: the downloaded snipset.exe failed "snipset.exe --version"; the installed snipset.exe was not changed' }
+  } else {
+    Write-SnipsetReport -Status SKIP -Item 'smoke' -Detail 'not a Windows host'
+  }
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-  Move-Item -LiteralPath $candidate -Destination (Join-Path $InstallDir 'snipset.exe') -Force
+  $exe = Join-Path $InstallDir 'snipset.exe'
+  Move-Item -LiteralPath $candidate -Destination $exe -Force
+  if ($windows) {
+    # Mark of the Web on the zip may or may not reach the extracted exe; Unblock-File is a no-op when absent.
+    Unblock-File -LiteralPath $exe
+  } else {
+    Write-SnipsetReport -Status SKIP -Item 'unblock' -Detail 'not a Windows host'
+  }
 }
 function Add-SnipsetToUserPath {
   param([string]$Dir)

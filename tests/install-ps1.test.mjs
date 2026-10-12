@@ -20,7 +20,7 @@ const installScript = installerPath("ps1");
 const version = "v0.1.0";
 const archiveName = `snipset-cli-${version}-x86_64-pc-windows-msvc.zip`;
 // pwsh sends startup telemetry unless this is set before the process starts.
-const pwshEnv = { ...process.env, POWERSHELL_TELEMETRY_OPTOUT: "1" };
+const pwshEnv = { ...process.env, POWERSHELL_TELEMETRY_OPTOUT: "1", SNIPSET_INSTALL_ALLOW_NON_WINDOWS: "1" };
 
 async function withWorkspace(fn) {
   const root = await mkdtemp(join(tmpdir(), "snipset-install-ps1-test-"));
