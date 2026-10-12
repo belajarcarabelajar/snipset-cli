@@ -288,3 +288,33 @@ Findings from reviewer A (removal safety, HEAD `ff07a9b`), each reproduced in a 
 - `shell.sh`: `shell_remove` with `do_shell=0` reports `[SKIP] shell: --no-shell, nothing to remove` and deletes nothing; with `do_shell=1` it deletes only regular files (a symlink is `[KEEP]`).
 - `binary.sh`: a symlink at `<install_dir>/snipset` or `snipset-shims` is `[KEEP] ... symlink left in place`.
 - Tests: `TMPDIR` pointing at a missing dir and a read-only directory holding `.profile` each leave every startup file byte-identical, report `[FAIL]`, and exit 1; the legacy line survives with the hint; `--no-shell` uninstall leaves a user's `tab.sh` and the dir; a symlinked `snipset` survives uninstall.
+
+## C23 (T23): README and docs, owner `nappy`
+
+`README.md`, `.opencode/commands/check-wiring.md`, `.opencode/commands/verify.md`, and a new `tests/readme-install.test.mjs`. Keep the section "Querying the live database (companion workflow)" byte-identical. Write for a first-time user: short sentences, tables where they help, no marketing words, no em dash.
+
+README sections, in order: a short intro (Linux x64 and Windows x64; the release is a Draft until published, see Known limits); **Install matrix**; Linux x64 (pinned one-liner, now from the tag: `https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.sh`, plus the `main` form as an alternative); setup flags table (every flag from `bash install.sh --help`); **Check, update, uninstall, dry run** (what each does, exit codes 0/1/2, that `--check` and `--uninstall` take the same directory and `--with-mcp` flags as the install, that `--dry-run --uninstall` is refused, that the database is never removed, that empty directories may remain); **Offline install** (`--from DIR` holding `SHA256SUMS` and the archive, `gh release download v0.2.0 -R belajarcarabelajar/snipset-cli -D DIR`); **Shells and PATH** (what `--add-path` writes for bash, zsh, fish, and that the old `export PATH=` line is kept with a hint); **MCP registration** (the six ids, the add and remove command each uses, never overwrites, user scope only for Claude and Gemini); Windows x64 (one-liner from the tag, every `install.ps1` parameter, `-Check`/`-Update`/`-Uninstall`/`-DryRun`/`-From`/`-WithMcp`, the User Path handling, `Get-Help`); **Package managers** (Scoop: `scoop bucket add snipset https://github.com/belajarcarabelajar/snipset-cli` then `scoop install snipset/snipset`; winget: `winget install BCBAcademy.SnipsetCLI` after the manifests are accepted, and `winget install --manifest packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/0.2.0` for a local test with `LocalManifestFiles` enabled; AUR: `snipset-cli` after it is published, or `makepkg -si` in `packaging/aur/snipset-cli`; Homebrew: `brew tap belajarcarabelajar/snipset https://github.com/belajarcarabelajar/snipset-cli` then `brew install belajarcarabelajar/snipset/snipset`; Nix: `nix run github:belajarcarabelajar/snipset-cli` with the unfree note); **Version managers** (mise `mise use -g github:belajarcarabelajar/snipset-cli@0.2.0`, eget `eget belajarcarabelajar/snipset-cli --tag v0.2.0 --file snipset --to ~/.local/bin`, ubi `ubi -p belajarcarabelajar/snipset-cli -t v0.2.0 -e snipset -i ~/.local/bin`); Help; the companion workflow section (unchanged); Manual downloads (fix: the Windows zip holds `snipset.exe` and `LICENSE`); **Known limits**; Updates and uninstall (now points to the lifecycle section; keep the manual Windows PATH note only as a fallback).
+
+Install matrix rows and their status text, verbatim in meaning (dates are 2026-10-12):
+
+| Channel | Status |
+|---|---|
+| `install.sh` on Arch Linux x86_64 | verified: 191 sandboxed tests plus an install of the real v0.2.0 assets in a temp HOME (`tests/install-real-assets.test.mjs`) |
+| `install.sh` on Debian, Ubuntu, Fedora, WSL | not verified (no container runs; glibc 2.34 and OpenSSL 3 are required) |
+| `install.sh --from` (offline) | verified (same runs) |
+| `install.ps1` on Windows x64 | not verified on Windows; runs under PowerShell 7.6.6 on Linux against fixtures and the real zip, which proves runtime faults only |
+| Scoop | not verified (no Windows); the manifest passes the vendored Scoop schema |
+| winget | not submitted; the manifests pass the vendored 1.12.0 schemas |
+| AUR | not published; the package builds with makepkg on Arch from the real tarball and its binary runs |
+| Homebrew tap | not verified (brew absent); structural checks only |
+| Nix flake | not verified (nix absent); structural checks and the hash |
+| mise, eget, ubi | not verified (tools absent) |
+| `gh release download` | verified (owner account, Draft release) |
+
+Known limits (each one line): the release is a Draft, so until it is published only the owner can download it and every channel above fails for others; Linux needs x86_64, glibc 2.34 or newer, `libcrypto.so.3` (OpenSSL 3), and bash 4.4; macOS, ARM, and musl (Alpine) are refused; Windows 10 on Arm is refused (Windows 11 on Arm runs the x64 build under emulation); the Windows exe is unsigned, so Smart App Control can block it; wget cannot refuse a redirect from https to http (curl can, and is used when present); `--check` or `--uninstall` with `--with-mcp=claude` runs `claude mcp get`, which updates Claude's own state files; the output formats of `codex`, `gemini`, and VS Code were not observed, and the Windows config paths for Cursor, Codex, and Gemini are inferred; uninstall leaves empty directories; `--check` needs the same flags as the install; the EULA in LICENSE applies to every channel.
+
+`.opencode/commands/check-wiring.md`: the `--add-path` step now expects the source line `. "<share>/env"` in the temp `.profile` and the env file. `.opencode/commands/verify.md`: add `bun scripts/installer/build.mjs --check` and `bun scripts/packaging/render.mjs --check` to the steps.
+
+`tests/readme-install.test.mjs`: every flag printed by `bash install.sh --help` appears in README; every parameter in the `install.ps1` param block appears; the matrix has a row for each channel above and each status starts with `verified` or `not verified`, `not submitted`, or `not published`; the Draft caveat is present; the zip line names `LICENSE`; the companion section is byte-identical to `git show HEAD~0:README.md`'s copy at the start of this chunk (read it once at test time from the committed file is not possible, so embed its first and last lines and assert both appear in order); no em dash in README or the two command files.
+
+RED: `timeout 120 bun test --timeout 30000 tests/readme-install.test.mjs` exits 1. GREEN: exit 0, and the em dash scan exits 1 (no match).
