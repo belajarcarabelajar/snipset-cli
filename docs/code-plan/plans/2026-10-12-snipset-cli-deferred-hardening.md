@@ -1,7 +1,7 @@
 ---
 schema: ultra-plan/v1
 plan_id: 2026-10-12-snipset-cli-deferred-hardening
-status: Approved
+status: InProgress
 version: 1
 runner_contract: true
 defaults:
@@ -179,6 +179,20 @@ tasks:
       - cmd: "bash -c '! git log origin/main..HEAD --format=%B | rg -i \"co-authored-by|generated with|\\x{1F916}\"'"
         expect_exit: 0
         retry: 0
+  - id: F01
+    depends_on: [T10]
+    impacts: ["S2: startup files the installer created are removed once only whitespace is left - bun test tests/install-startup-files.test.mjs", "the shell and dirs suites that assumed the emptied file stays - bun test tests/install-shell.test.mjs tests/install-dirs.test.mjs"]
+    files: { create: [tests/install-startup-files.test.mjs], modify: [scripts/installer/sh/lib.sh, scripts/installer/sh/modes.sh, scripts/installer/sh/pathenv.sh, scripts/installer/sh/shell.sh, install.sh, tests/install-dirs.test.mjs, tests/install-shell.test.mjs, README.md, tests/readme-install.test.mjs], test: [] }
+    idempotency_key: "F01:created-startup-files"
+    skip_if: "timeout 200 bun test --timeout 30000 tests/install-startup-files.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 200 bun test --timeout 30000 tests/install-startup-files.test.mjs"
+        expect_exit: 0
+        retry: 1
+      - cmd: "bun scripts/installer/build.mjs --check --target sh"
+        expect_exit: 0
+        retry: 0
 ---
 
 # Snipset CLI Deferred Hardening Plan
@@ -240,7 +254,8 @@ flowchart TD
     T05 --> T10
     T08 --> T10
     T09 --> T10
-    T10 --> PR{{"PR, merge gate"}}
+    T10 --> F01["F01 S2 created startup files, debt sweep"]
+    F01 --> PR{{"PR, merge gate"}}
 ```
 
 ## 3. Acceptance Criteria and Traceability
@@ -325,6 +340,9 @@ Rules for every chunk (carried from the install-coverage contracts and `MEMORY.m
 ### Task T10: Full local verification
 **Files:** none. **Behaviour:** the nine `run[]` steps, run with `SNIPSET_REAL_ASSETS` pointing at the verified v0.2.0 assets; every exit code and count goes into the checklist.
 
+### Task F01: Created startup files (debt sweep S2)
+**Files:** Modify `scripts/installer/sh/lib.sh`, `modes.sh`, `pathenv.sh`, `shell.sh`, `install.sh`, `tests/install-dirs.test.mjs`, `tests/install-shell.test.mjs`, `README.md`, `tests/readme-install.test.mjs`; Create `tests/install-startup-files.test.mjs`. **Behaviour:** the installer lists startup files it created in `<install-dir>/.snipset-files`; uninstall removes a listed file that the current flags could have created, that is a regular file, and that holds only whitespace. A file the user already had, or one with any other byte, stays.
+
 ## 6. Checklist
 
 - [x] Explore: three read-only grounding reports (Linux items, Windows and Homebrew items, vivera L11), 2026-10-12.
@@ -341,7 +359,8 @@ Rules for every chunk (carried from the install-coverage contracts and `MEMORY.m
 - [x] T09 adversarial removal review. Evidence: `docs/code-plan/sessions/2026-10-12-snipset-cli-deferred-hardening/review.md`. Two independent reviewers on `3f46e61`: Linux `correct` with one P2 (README overclaimed for the default share dir without a manifest) and one P3 (`mv -f` into a directory or a link to one), both fixed in `63055ce` with RED then GREEN tests (nine Linux suites 149 pass); Windows `correct`, no qualifying findings.
   - [x] Parent pre-review probe (2026-10-12, inline while subagents were blocked): an install by the pre-change `install.sh` (`1562bb1`), then a reinstall and an uninstall with the new one, restored `.bashrc` and `.profile` byte for byte but left the empty default share dir, which HEAD's uninstall removed (a regression on the upgrade path). Fix: a reinstall that takes over legacy files in the default share dir adds that dir to the record. RED 1 fail (adoption) with the control passing; GREEN nine Linux suites 146 pass; the probe now leaves only `.local`, `.local/bin`, `.local/share`, which HEAD never removed.
 - [x] T10 full local verification at `70bc688`. Evidence: runner `--execute` exit 0 with a current mirror (T10 PASSED, empty error ledger, em dash and attribution scans included); full suite 581 pass 6 skip 0 fail; restricted PATH 430 pass 157 skip 0 fail; real assets 4 pass; PKGBUILD shellcheck exit 0; `tests/install.Tests.ps1` passed.
-- [ ] Deliver: commits by explicit path under the owner identity, no co-author trailer; PR body from a file with `--body-file`; registry `pr`.
+- [x] Deliver: commits by explicit path under the owner identity, no co-author trailer; PR #8 from `--body-file`; registry `open #8`.
+- [x] F01 S2 created startup files (debt sweep, owner-selected). Evidence: RED on a HEAD-only bundle (byte-identical to the committed `install.sh`) exit 1, 5 fail plus 1 for the unreadable-record test (the emptied `--bashrc` and `.zshenv` stayed, HOME not empty, a linked record written into); six mutations each turn only their test red; GREEN 16 Linux suites 245 pass; one existing test (`uninstall of a bashrc holding only the block leaves it empty`) pinned the old behaviour for a created file and now seeds the user's own `.bashrc`; README states the rule, pinned by a test; `build.mjs --check`, `bash -n`, `shellcheck -S warning` exit 0.
 - [ ] Sweep: debt sweep, learning ledger, closeout decision, graph index.
 
 ## 7. Risks and Decisions
