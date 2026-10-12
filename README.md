@@ -24,7 +24,7 @@ Status on 2026-10-12.
 
 ## Linux x64
 
-Download the installer, read it, then install a pinned release:
+Download the installer, read it, then install a pinned release. The `v0.2.0` URL works once that tag exists; the tag is created when the Draft release is published.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.sh -o install-snipset.sh
@@ -38,7 +38,7 @@ The copy on `main` works too. It gets installer fixes before the next tag:
 curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/main/install.sh -o install-snipset.sh
 ```
 
-The installer needs x86_64, glibc 2.34 or newer, OpenSSL 3 (`libcrypto.so.3`), bash 4.4 or newer, `tar`, `curl` or `wget`, and one of `sha256sum`, `shasum`, or `openssl`. It refuses other systems before it writes anything.
+The installer needs x86_64, glibc 2.34 or newer, OpenSSL 3 (`libcrypto.so.3`), bash 4.4 or newer, `tar`, `curl` or `wget`, and one of `sha256sum`, `shasum`, or `openssl`. It refuses another OS, CPU, or libc (macOS, ARM, musl, glibc older than 2.34) before it downloads anything. A missing `libcrypto.so.3` is caught when the new binary is test-run, after the download and before anything is replaced; an empty install directory can remain.
 
 The default destination is `~/.local/bin`. The installer checks the archive against `SHA256SUMS` and runs the new binary before it replaces an existing one.
 
@@ -49,7 +49,7 @@ bash install-snipset.sh --version v0.2.0 --add-path --with-mcp=claude,opencode
 bash install-snipset.sh --version v0.2.0 --no-init --no-shell --no-shims
 ```
 
-Releases without the shell bundle ship the binary only. The installer then skips the setup steps with a note and still exits 0.
+Releases without the shell bundle ship the binary only. The installer then skips shell integration and shims with a note and still exits 0; the database, PATH, and MCP steps still run.
 
 ### Setup flags
 
@@ -77,7 +77,7 @@ Releases without the shell bundle ship the binary only. The installer then skips
 
 | Mode | What it does |
 | --- | --- |
-| `--check` | Reads only. Prints one line per item: binary, shell files, database, shims, PATH, MCP. Ends with `check: CURRENT` or `check: DRIFT (N items)`. |
+| `--check` | Writes nothing (with `--with-mcp=claude`, the `claude` CLI updates its own state, see [Known limits](#known-limits)). Prints one line per item: binary, shell files, database, shims, PATH, MCP. Ends with `check: CURRENT` or `check: DRIFT (N items)`. |
 | `--update` | Installs the latest release, or the one in `--version`, over the current one. Does nothing when that version is already installed. |
 | `--uninstall` | Removes what an install with the same flags wrote, including MCP entries for the `--with-mcp` list you pass. Ends with `uninstall: removed N, kept N`. |
 | `--dry-run` | Prints a `[DRY]` line for every install step and writes nothing. |
@@ -85,7 +85,7 @@ Releases without the shell bundle ship the binary only. The installer then skips
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Done. For `--check`: everything is current. |
-| 1 | A step failed, the system was refused, or `--check` found drift. |
+| 1 | A required step failed (download, checksum, archive, binary test run, an `[FAIL]` line), the system was refused, or `--check` found drift. A failed `snipset init` or shim generation only prints a note. |
 | 2 | Usage error: an unknown flag, a missing value, two modes at once, or `--dry-run --uninstall`. |
 
 Rules:
@@ -121,7 +121,7 @@ bash install-snipset.sh --from snipset-assets --add-path
 | Shell | File | When |
 | --- | --- | --- |
 | sh and bash login | `~/.profile` | always |
-| bash | `~/.bashrc`, `~/.bash_profile`, `~/.bash_login`, and the `--bashrc` file | when the file exists |
+| bash | `~/.bashrc`, `~/.bash_profile`, `~/.bash_login`, and the `--bashrc` file | when the file exists, and the `--bashrc` file also when shell integration is about to create it |
 | zsh | `$ZDOTDIR/.zshenv`, or `~/.zshenv` without `ZDOTDIR` | when zsh is your `$SHELL` or is on PATH |
 | fish | `~/.config/fish/conf.d/snipset.fish` (honours `XDG_CONFIG_HOME`), which sources `<share-dir>/env.fish` | when fish is your `$SHELL` or is on PATH |
 
@@ -167,7 +167,7 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 | `-DryRun` | Print one `[DRY]` line per step and write nothing. |
 | `-Check` | Report whether the install is current. Throws on drift. |
 | `-Update` | Install the requested or latest release over the current one. |
-| `-Uninstall` | Remove `snipset.exe`, the install dir from the User `Path`, and the MCP entries for the `-WithMcp` list. Never removes the database. |
+| `-Uninstall` | Remove `snipset.exe`, the MCP entries for the `-WithMcp` list, and the install dir from the User `Path` when the installer added it (and `snipset.exe` was removed). Never removes the database. |
 
 ```powershell
 .\install.ps1 -Check -AddPath -WithMcp claude,codex
@@ -183,7 +183,7 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 
 ## Package managers
 
-These install the binary (and on Linux the shell files) only. None of them runs the setup steps of `install.sh`.
+These install the binary only, plus on Linux the shims generator and bash completion (AUR and Homebrew also install `snipset.sh` and `tab.sh`). None of them runs the setup steps of `install.sh`.
 
 Scoop (Windows), from the `bucket/snipset.json` manifest in this repo:
 
@@ -243,7 +243,7 @@ mise checks the asset with the digest GitHub publishes. eget checks a checksum a
 
 ## Help
 
-The Linux installer and the live wrapper print usage with `--help` and exit 0. On a usage error the installer prints the same text and exits 2.
+The Linux installer and the live wrapper print usage with `--help` and exit 0. A usage error exits 2; most print the usage text, and a few (such as `--dry-run --uninstall` or a malformed `--version`) print one line.
 
 ```sh
 bash install-snipset.sh --help
@@ -312,7 +312,7 @@ The CLI works against a standalone database created by `snipset init`, or agains
 - wget cannot refuse a redirect from https to http; curl can, and the installer uses curl when it is present.
 - `--check` or `--uninstall` with `--with-mcp=claude` runs `claude mcp get`, which updates Claude's own state files.
 - The output formats of `codex`, `gemini`, and VS Code were not observed, and the Windows config paths for Cursor, Codex, and Gemini are inferred.
-- Uninstall leaves empty directories.
+- Uninstall may leave empty directories (for example `~/.local/bin` or `~/.config/opencode`); it removes an empty share dir on Linux and an empty install dir on Windows.
 - `--check` needs the same flags as the install.
 - The EULA in `LICENSE` applies to every channel.
 
