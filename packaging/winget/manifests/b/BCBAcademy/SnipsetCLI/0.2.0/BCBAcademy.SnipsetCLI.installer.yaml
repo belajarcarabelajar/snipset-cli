@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+PackageIdentifier: BCBAcademy.SnipsetCLI
+PackageVersion: 0.2.0
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+- RelativeFilePath: snipset.exe
+  PortableCommandAlias: snipset
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.2.0/snipset-cli-v0.2.0-x86_64-pc-windows-msvc.zip
+  InstallerSha256: 90D888F74EDB2D6711ADEE445B5BA25FE85AB3E374BFB341D946AAF18A80EDCC
+ManifestType: installer
+ManifestVersion: 1.12.0
