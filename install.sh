@@ -794,7 +794,6 @@ shims_remove() {
     report REMOVED shims "$manifest"
   fi
 }
-mcp_all_ids="claude codex gemini opencode cursor vscode"
 mcp_cli() {
   case "$1" in
     claude|codex|gemini) printf '%s' "$1" ;;
@@ -836,9 +835,75 @@ mcp_trim() {
   s="${s#"${s%%[![:space:]]*}"}"
   printf '%s' "${s%"${s##*[![:space:]]}"}"
 }
-# Prints nocli, absent, other (file without snipset), mine, or foreign.
+mcp_gemini_settings() { printf '%s' "${HOME}/.gemini/settings.json"; }
+# Only a user-scope entry is the installer's: "remove --scope user" never touches
+# another scope, and an entry in another scope can shadow the user one.
+mcp_claude_probe() {
+  local out line scope="" first="" cmd mine=0 bin_seen=0
+  # "claude mcp get" starts the server to report its status and writes Claude's own
+  # state (~/.claude, ~/.cache), so --check is not read-only for this harness.
+  if ! out="$(claude mcp get snipset 2>/dev/null </dev/null)"; then
+    printf 'absent'
+    return 0
+  fi
+  while IFS= read -r line; do
+    line="$(mcp_trim "$line")"
+    case "$line" in
+      [Ss]cope:*)
+        scope="$(mcp_trim "${line#*:}")"
+        case "$scope" in
+          [Uu]ser*) scope=user ;;
+          [Ll]ocal*) scope=local ;;
+          [Pp]roject*) scope=project ;;
+          *) scope="${scope%% *}" ;;
+        esac
+        [[ -n "$first" ]] || first="$scope" ;;
+      [Cc]ommand:*)
+        cmd="$(mcp_trim "${line#*:}")"
+        if [[ "$cmd" == "$snipset_bin" ]]; then
+          bin_seen=1
+          [[ "$scope" != user ]] || mine=1
+        fi
+        scope="" ;;
+    esac
+  done <<< "$out"
+  if ((mine)); then
+    printf 'mine user'
+  elif ((bin_seen)); then
+    printf 'scoped %s' "${first:-unknown}"
+  else
+    printf 'foreign %s' "${first:-unknown}"
+  fi
+}
+# The user settings file decides ownership; "gemini mcp list" merges every scope.
+mcp_gemini_probe() {
+  local settings out line text=""
+  settings="$(mcp_gemini_settings)"
+  [[ ! -f "$settings" ]] || text="$(cat -- "$settings")"
+  if [[ "$text" == *'"snipset"'* ]]; then
+    if [[ "$text" == *"\"${snipset_bin}\""* ]]; then printf 'mine'; else printf 'foreign'; fi
+    return 0
+  fi
+  out="$(gemini mcp list 2>/dev/null </dev/null)" || out=""
+  while IFS= read -r line; do
+    case "$line" in
+      snipset:*|*[[:space:]]snipset:*) printf 'scoped'; return 0 ;;
+    esac
+  done <<< "$out"
+  printf 'absent'
+}
+# Detail for an entry the installer leaves alone because it sits in another scope.
+mcp_scoped_detail() {
+  case "$1" in
+    claude) printf '%s entry left untouched' "$2" ;;
+    gemini) printf 'snipset is registered outside %s; left untouched' "$(mcp_gemini_settings)" ;;
+  esac
+}
+# Prints nocli, absent, other (file without snipset), mine, foreign, or scoped
+# (the binary is registered in a scope the installer does not own), and for
+# claude a second word naming the scope.
 mcp_probe() {
-  local id="$1" cli out line cmd="" text found=0
+  local id="$1" cli out line cmd="" text
   cli="$(mcp_cli "$id")"
   case "$id" in
     claude|codex|gemini)
@@ -848,8 +913,10 @@ mcp_probe() {
       fi ;;
   esac
   case "$id" in
-    claude|codex)
-      if ! out="$("$cli" mcp get snipset 2>/dev/null </dev/null)"; then
+    claude) mcp_claude_probe ;;
+    gemini) mcp_gemini_probe ;;
+    codex)
+      if ! out="$(codex mcp get snipset 2>/dev/null </dev/null)"; then
         printf 'absent'
         return 0
       fi
@@ -860,20 +927,6 @@ mcp_probe() {
         esac
       done <<< "$out"
       if [[ "$cmd" == "$snipset_bin" ]]; then printf 'mine'; else printf 'foreign'; fi ;;
-    gemini)
-      out="$(gemini mcp list 2>/dev/null </dev/null)" || out=""
-      while IFS= read -r line; do
-        case "$line" in
-          snipset:*|*[[:space:]]snipset:*) found=1; break ;;
-        esac
-      done <<< "$out"
-      if ((!found)); then
-        printf 'absent'
-      elif [[ "${line} " == *"snipset: ${snipset_bin} "* ]]; then
-        printf 'mine'
-      else
-        printf 'foreign'
-      fi ;;
     *)
       if [[ ! -f "$(mcp_file "$id")" ]]; then
         printf 'absent'
@@ -902,7 +955,7 @@ mcp_add() {
 }
 mcp_install() {
   local snipset_bin="${install_dir}/snipset"
-  local id state file cli
+  local id state scope file cli
   local -a ids
   read -r -a ids <<< "$mcp_list"
   for id in "${ids[@]}"; do
@@ -911,7 +964,7 @@ mcp_install() {
       report SKIP "$id" "${cli} not on PATH"
       continue
     fi
-    state="$(mcp_probe "$id")"
+    read -r state scope <<< "$(mcp_probe "$id")"
     file="$(mcp_file "$id")"
     case "$id" in
       opencode|cursor)
@@ -932,7 +985,7 @@ mcp_install() {
           report KEEP "$id" 'snipset is already registered'
         fi ;;
       *)
-        if [[ "$state" == mine || "$state" == foreign ]]; then
+        if [[ "$state" != absent ]]; then
           report KEEP "$id" 'snipset is already registered'
         elif mcp_add "$id"; then
           report ADD "$id" 'snipset registered'
@@ -944,7 +997,7 @@ mcp_install() {
 }
 mcp_check() {
   local snipset_bin="${install_dir}/snipset"
-  local id cli
+  local id cli state scope
   local -a ids
   read -r -a ids <<< "$mcp_list"
   if ((${#ids[@]} == 0)); then
@@ -957,9 +1010,11 @@ mcp_check() {
       report SKIP "$id" "${cli} not on PATH"
       continue
     fi
-    case "$(mcp_probe "$id")" in
+    read -r state scope <<< "$(mcp_probe "$id")"
+    case "$state" in
       mine) report OK "$id" "snipset points at ${snipset_bin}" ;;
       foreign) report KEEP "$id" 'snipset points elsewhere' ;;
+      scoped) report KEEP "$id" "$(mcp_scoped_detail "$id" "$scope")" ;;
       *) report MISSING "$id" 'snipset is not registered' ;;
     esac
   done
@@ -979,14 +1034,19 @@ mcp_remove_entry() {
 }
 mcp_remove() {
   local snipset_bin="${install_dir}/snipset"
-  local id state file text
+  local id state scope file text
   local -a ids
-  read -r -a ids <<< "${mcp_list:-$mcp_all_ids}"
+  read -r -a ids <<< "$mcp_list"
+  if ((${#ids[@]} == 0)); then
+    report SKIP mcp 'no --with-mcp list'
+    return 0
+  fi
   for id in "${ids[@]}"; do
-    state="$(mcp_probe "$id")"
+    read -r state scope <<< "$(mcp_probe "$id")"
     file="$(mcp_file "$id")"
     case "${id}:${state}" in
       *:nocli) report SKIP "$id" "$(mcp_cli "$id") not on PATH" ;;
+      claude:foreign|*:scoped) report KEEP "$id" "$(mcp_scoped_detail "$id" "$scope")" ;;
       *:foreign) report KEEP "$id" 'snipset points elsewhere' ;;
       *:absent|*:other) report SKIP "$id" 'snipset is not registered' ;;
       claude:mine) mcp_remove_entry "$id" snipset claude mcp remove --scope user snipset ;;
