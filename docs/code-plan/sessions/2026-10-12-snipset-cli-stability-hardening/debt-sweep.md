@@ -73,3 +73,15 @@ Asked after the final recap as one multi-select question (header `Follow-ups`): 
 | Answer | `Mark Complete` (owner, 2026-10-12) |
 | Evidence | readiness output above; runner `--execute` exit 0 with T3 and T8 `PASSED`; `plan-mark-done` ticked 11 of 11 tasks |
 | Resulting status | `Complete`, committed on the session branch so it ships in PR #4 |
+
+## 8. Graph Index and Final Sync
+
+| Step | Command | Exit | Result |
+|---|---|---|---|
+| Code graph | `graphify update .` (session worktree) | 0 | `graphify-out/` created; ignored by the new `.gitignore` |
+| Document sync preview | `bun ~/vivera/scripts/graphify-sync.mjs --root "$(pwd)" --dry-run` | 0 | eligible docs 20, heading nodes 165, nodes 287 -> 437 |
+| Document sync | same without `--dry-run` | 0 | wrote `graphify-out/graph.json`, 437 nodes, 492 links |
+| Check | `bun ~/vivera/scripts/graphify-sync.mjs --check --root "$(pwd)"` | 0 | nodes 437 -> 437 |
+| Query | `graphify query "snipset-live read allowlist"` | 0 | returns `Task T1: Read allowlist routing` and the wrapper files |
+| Mirror | `bun scripts/plan-publish.mjs <plan>` then `--check` (vivera) | 0, 0 | vault mirror current |
+| Issue | `bun scripts/plan-issue-sync.mjs <plan>` then `--check` (vivera) | 0, 0 | `update-and-state`; issue #3 `CLOSED` |
