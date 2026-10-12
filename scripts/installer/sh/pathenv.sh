@@ -63,27 +63,55 @@ pathenv_strip() {
     END { if (held) print prev }
   ' "$1"
 }
-pathenv_add() {
-  local file conf
-  ((add_path)) || return 0
-  mkdir -p "$share_dir"
-  pathenv_env_text > "${share_dir}/env"
-  pathenv_fish_env_text > "${share_dir}/env.fish"
-  pathenv_line_add "${HOME}/.profile"
-  pathenv_collect_bash
-  for file in "${pathenv_bash[@]}"; do
-    # shell_block_add creates the --bashrc file right after this, so a rerun would otherwise find it new.
-    if [[ -e "$file" ]] || { [[ "$file" == "$bashrc" ]] && ((do_shell && ${has_shell:-0})); }; then
-      pathenv_line_add "$file"
+pathenv_marked() {
+  local first=""
+  [[ -f "$1" ]] || return 1
+  IFS= read -r first 2>/dev/null < "$1" || true
+  [[ "$first" == "$pathenv_mark" ]]
+}
+# Writes FILE from TEXT_FN only when FILE is absent or carries the marker on line 1.
+# Returns 0 when FILE holds the managed text, 1 when FILE is the user's, 2 on failure.
+pathenv_put() {
+  local label="$1" file="$2" fn="$3" hint="$4"
+  if [[ ! -e "$file" && ! -L "$file" ]]; then
+    if mkdir -p "${file%/*}" 2>/dev/null && "$fn" 2>/dev/null > "$file"; then
+      return 0
     fi
-  done
-  if pathenv_uses zsh; then
-    pathenv_line_add "$(pathenv_zshenv)"
+    report FAIL "$label" "$file could not be written"
+    return 2
   fi
-  if pathenv_uses fish; then
-    conf="$(pathenv_fish_conf)"
-    mkdir -p "${conf%/*}"
-    pathenv_fish_conf_text > "$conf"
+  if ! pathenv_marked "$file"; then
+    report KEEP "$label" "${file}: not written by the installer; add the line by hand: ${hint}"
+    return 1
+  fi
+  if pathenv_same "$file" "$("$fn"; printf x)" || rewrite_from "$file" "$fn"; then
+    return 0
+  fi
+  rewrite_fail "$label" "$file"
+  return 2
+}
+pathenv_add() {
+  local file env_rc=0 fish_rc=0
+  ((add_path)) || return 0
+  pathenv_put 'path env' "${share_dir}/env" pathenv_env_text "export PATH=\"${install_dir}:\$PATH\"" || env_rc=$?
+  pathenv_put 'path env.fish' "${share_dir}/env.fish" pathenv_fish_env_text \
+    "set -gx PATH \"${install_dir}\" \$PATH" || fish_rc=$?
+  # A source line or fish conf would run a file the installer did not write at every login.
+  if ((env_rc == 0)); then
+    pathenv_line_add "${HOME}/.profile"
+    pathenv_collect_bash
+    for file in "${pathenv_bash[@]}"; do
+      # shell_block_add creates the --bashrc file right after this, so a rerun would otherwise find it new.
+      if [[ -e "$file" ]] || { [[ "$file" == "$bashrc" ]] && ((do_shell && ${has_shell:-0})); }; then
+        pathenv_line_add "$file"
+      fi
+    done
+    if pathenv_uses zsh; then
+      pathenv_line_add "$(pathenv_zshenv)"
+    fi
+  fi
+  if ((fish_rc == 0)) && pathenv_uses fish; then
+    pathenv_put 'path fish' "$(pathenv_fish_conf)" pathenv_fish_conf_text "source \"${share_dir}/env.fish\"" || true
   fi
 }
 pathenv_check_managed() {
@@ -128,7 +156,9 @@ pathenv_check() {
 }
 pathenv_remove_managed() {
   [[ -e "$2" || -L "$2" ]] || return 1
-  if ! pathenv_same "$2" "$3"; then
+  if ! pathenv_same "$2" "$3" && ! pathenv_marked "$2"; then
+    report KEEP "$1" "$2 not written by the installer; left in place"
+  elif ! pathenv_same "$2" "$3"; then
     report KEEP "$1" "$2 edited; remove it by hand"
   elif rm -f -- "$2" 2>/dev/null && [[ ! -e "$2" ]]; then
     report REMOVED "$1" "$2"
