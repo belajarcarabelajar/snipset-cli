@@ -1,0 +1,162 @@
+# Batch Manifest and Subagent Contracts: snipset-cli install coverage
+
+- **Parent plan:** `docs/code-plan/plans/2026-10-12-snipset-cli-install-coverage.md` (status Approved, Gate 2 on 2026-10-12)
+- **Session slot:** `install-coverage` (registry state `active`)
+- **Working directory:** `/home/belajarcarabelajar/Proyek/snipset-cli-wt/install-coverage` (every relative path below resolves here)
+- **Head branch:** `2026-10-12-snipset-cli-install-coverage/install-coverage`
+- **Delegation mode:** `isolated-files` inside one worktree
+
+## Rules for every chunk
+
+- Git is parent-only: never run `git commit`, `git add`, `git checkout`, `git switch`, `git merge`, `git rebase`, `git stash`, `git reset`, `git push`, `gh`, or anything else that writes git state.
+- Edit only the permitted files. Never write `install.sh`, `install.ps1`, or a rendered output another chunk owns; the parent regenerates bundles. A needed change outside the list is a report line.
+- Shell `rm` is denied on this machine: remove temp dirs from inside tests with `fs.rm` (`afterEach`), never from the shell. Never touch the real HOME, `~/.claude.json`, `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.config/Code`, `~/.config/opencode`.
+- No network in tests. Bun only (`bun test`, `bun <script>`). `bun:test` or `node:test` like the neighbouring tests. Pass `--timeout 30000` (or higher for pwsh/makepkg) to every run.
+- English identifiers and comments; comments only for a non-obvious why. No em dash anywhere. No attribution lines.
+- Report: what changed (paths), RED evidence (command, exit code, failing test names), GREEN evidence (command, exit code, pass count), anything not done, and a `Not read:` line. Stop and report within 30 turns; if you near the limit, send what you have.
+
+## Batch manifest
+
+| Chunk | Task | Wave | Owner | Permitted files | Verification |
+|---|---|---|---|---|---|
+| C01 | T01 | 1 | `chef` | `tests/helpers/install-sandbox.mjs` (new), `tests/install-sandbox.test.mjs` (new) | `timeout 120 bun test --timeout 30000 tests/install-sandbox.test.mjs` |
+| C17 | T17 | 1 | `nappy` | `scripts/packaging/render.mjs`, `packaging/VERSION`, `packaging/SHA256SUMS`, `tests/helpers/schema-lite.mjs`, `tests/packaging-render.test.mjs`, `tests/fixtures/packaging/demo/target.json`, `tests/fixtures/packaging/demo/demo.txt.tmpl` (all new) | `timeout 120 bun test --timeout 30000 tests/packaging-render.test.mjs` |
+| C02 | T02 | 2 | `chef` | plan T02 `files` | plan T02 `run[]` |
+| C18 to C22 | T18 to T22 | 2 | `nappy`, `hoggy`, `chef`, `nappy`, `hoggy` | plan `files` of each task | plan `run[]` of each task |
+| C03, C04 | T03, T04 | 3 | `chef`, `nappy` | plan `files` | plan `run[]` |
+| C05 to C11, C13 | T05 to T11, T13 | 4 | `chef`, `nappy`, `hoggy`, `chef`, `nappy`, `hoggy`, `chef`, `nappy` | plan `files` | plan `run[]` |
+| C12, C14, C16 | T12, T14, T16 | 5 | `hoggy`, `chef`, `nappy` | plan `files` | plan `run[]` |
+| C15 | T15 | 6 | `chef` | plan `files` | plan `run[]` |
+| C23 | T23 | 7 | `nappy` | plan `files` | plan `run[]` |
+| T24, T25 | | 7, 8 | parent, inline | `tests/install-real-assets.test.mjs` | plan `run[]` |
+
+- **Fan-out:** 23 subagent chunks over 8 waves, at most 8 at once. Wave 1 has 2 because every other task depends on T01 or T17.
+- **Chunk boundary check:** every chunk has one owner; within a wave no two chunks write the same file; the bundles and rendered outputs of other channels are parent-owned at integration.
+- **Re-dispatch rule:** a red chunk is re-chunked and re-dispatched alone, never twice unchanged.
+
+## C01 (T01): Sandbox helper, owner `chef`
+
+Create `tests/helpers/install-sandbox.mjs` and `tests/install-sandbox.test.mjs`. Do not edit any existing test.
+
+Exports:
+- `makeSandbox({ tools = DEFAULT_TOOLS } = {})` returns `{ root, home, bin, tmp, logFile, env(extra = {}), assertSandbox() }`. `root` is `fs.mkdtempSync(join(os.tmpdir(), "snipset-sbx-"))`; `home`, `bin`, `tmp` live under it. `bin` holds symlinks to each named tool, resolved from `/usr/bin` then `/bin` (never `~/.local/bin`: `grep` there is a tgrep shim). `env()` returns `{ HOME: home, PATH: bin, TMPDIR: tmp, LANG: "C", POWERSHELL_TELEMETRY_OPTOUT: "1", ...extra }` and nothing else from `process.env`. `assertSandbox()` throws unless `realpath(home)` is under `realpath(os.tmpdir())` and differs from `os.homedir()`. Also export `cleanupSandbox(sb)` using `fs.rm(root, { recursive: true, force: true })`.
+- `DEFAULT_TOOLS`: `bash sh env cat cp mv rm mkdir rmdir chmod ln ls mktemp tar gzip sha256sum awk sed grep head tail tr cut sort uniq dirname basename touch printf test wc cmp diff find xargs id uname date tee readlink realpath stat sleep`. No `curl`, `wget`, `snipset`, `shasum`, `openssl` unless a caller adds them.
+- `fakeLinuxRelease({ version = "0.1.0", badHash = false, withShell = true, starMarker = false, failingVersion = false } = {})` returns `{ dir, archive, sums, version, tag, assetName }`: a tarball named `snipset-cli-v<version>-x86_64-unknown-linux-gnu.tar.gz` holding a stub `snipset` (copy the semantics of `STUB_SNIPSET` in `tests/install.test.mjs`, but `--version` prints `snipset <version>`; with `failingVersion` it prints `snipset: error while loading shared libraries: libcrypto.so.3: cannot open shared object file` to stderr and exits 127), `LICENSE`, and with `withShell` the four `shell/` files (copy `SHELL_STUBS` and `FAKE_GENERATOR` from `tests/install.test.mjs`, but make the generated shims carry the real header `# snipset-shim for '<kw>' (exec mode, managed by snipset-shims; do not edit).` as line 2 and record keywords in `<dir>/.snipset-shims`, the way the private generator does). `SHA256SUMS` uses two spaces, or ` *` with `starMarker`.
+- `fakeWindowsRelease({ version = "0.1.0", badHash = false } = {})`: zip `snipset-cli-v<version>-x86_64-pc-windows-msvc.zip` with `snipset.exe` (text) and `LICENSE`, built with `bsdtar -a -cf` (present here); if `bsdtar` is absent, return `null` so callers skip with a reason.
+- `downloaderShims(sb, release, { curl = true, wget = false, latestTag } = {})` writes executable `curl` and/or `wget` stubs into `sb.bin`. They log one line of argv per call to `sb.logFile`, serve `*/releases/latest` as `{"tag_name":"<latestTag or release.tag>"}`, `*/SHA256SUMS` and the archive by name from `release.dir`, and exit 22 (curl) or 8 (wget) for anything else. Support `curl ... -o FILE URL`, `curl URL` to stdout, `wget -q -O FILE URL`, `wget -qO- URL`. Export `readDownloads(sb)` returning the logged lines.
+- `stubCommand(sb, name, body)` writes `#!/bin/sh` plus `body` to `sb.bin/<name>`, mode 0755.
+- `snapshotTree(dir)` returns a sorted array of `{ path, type, mode, sha256 | target }` for every entry (symlinks not followed); `diffSnapshots(a, b)` returns the changed paths.
+- `installerPath(target = "sh")`: `process.env.SNIPSET_INSTALL_SCRIPT` (sh) or `SNIPSET_INSTALL_PS1` (ps1) when set; else, when `scripts/installer/build.mjs` exists, run `bun scripts/installer/build.mjs --target <target> --out <temp dir>` once per process and return the built file; else the committed `install.sh` or `install.ps1` at the repo root.
+- `runInstaller(sb, args, { script = installerPath("sh"), env = {} } = {})` spawns `bash <script> ...args` with `sb.env(env)` and resolves `{ code, stdout, stderr }` (never rejects on non-zero).
+
+Self-tests in `tests/install-sandbox.test.mjs` (each is a positive or negative control):
+- `refuses a HOME outside the temp dir` (assertSandbox throws for `os.homedir()`).
+- a PATH built without curl really lacks it (`bash -c 'command -v curl'` exits 1 under `sb.env()`), and adding `curl` to `tools` makes it present.
+- the snapshot detects a one-byte change and a mode change.
+- `fakeLinuxRelease` archive passes `sha256sum -c` against its `SHA256SUMS`; `badHash` fails it.
+- `downloaderShims` serves the latest tag and the archive and logs both calls, for curl and for wget.
+- integration control: `runInstaller` with the committed `install.sh` and args `--version 0.1.0 --install-dir <home>/bin --no-init --no-shell --no-shims` exits 0 and `<home>/bin/snipset --version` prints `snipset 0.1.0`; with `badHash` it exits non-zero.
+- the sandbox root is gone after `cleanupSandbox`.
+
+RED: `timeout 120 bun test --timeout 30000 tests/install-sandbox.test.mjs` exits 1 before the helper exists. GREEN: same command exits 0.
+
+## C17 (T17): Manifest renderer, owner `nappy`
+
+Create the seven files listed in the manifest. Nothing else.
+
+- `packaging/VERSION`: the single line `0.2.0`.
+- `packaging/SHA256SUMS`: exactly these two lines (copied from the Draft release, verified with `sha256sum -c`):
+  `57b43b6ee0b55fc690cac8851d2c5009eefdc10e538fb5683bc294cf8c78cfe5  snipset-cli-v0.2.0-x86_64-unknown-linux-gnu.tar.gz`
+  `90d888f74edb2d6711adee445b5ba25fe85ab3e374bfb341d946aaf18a80edcc  snipset-cli-v0.2.0-x86_64-pc-windows-msvc.zip`
+- `scripts/packaging/render.mjs` (Bun, no dependency): `bun scripts/packaging/render.mjs [--check] [--channel ID] [--root DIR] [--templates DIR]`. Defaults: root is the repo root (two levels above the script), templates `<root>/packaging/templates`. Reads `<root>/packaging/VERSION` (semver, no `v`) and `<root>/packaging/SHA256SUMS` (lines `<64 hex>  <name>` or `<64 hex> *<name>`; refuse CR characters; both asset names for the version must be present). A channel is a subdirectory of the templates dir holding `target.json`: `{ "outputs": [{ "template": "<file>.tmpl", "out": "<path relative to root, may contain {{version}}>" }], "owns": "<optional dir relative to root>" }`. Placeholders: `{{version}}`, `{{tag}}` (`v<version>`), `{{asset.linux}}`, `{{asset.windows}}`, `{{url.linux}}`, `{{url.windows}}` (`https://github.com/belajarcarabelajar/snipset-cli/releases/download/<tag>/<asset>`), `{{sha256.linux}}`, `{{sha256.windows}}`, `{{sha256.linux.upper}}`, `{{sha256.windows.upper}}`, `{{sri.linux}}`, `{{sri.windows}}` (`sha256-` plus base64 of the digest bytes). An unknown placeholder is an error naming it and the template. Write mode creates parent dirs and prints `rendered <out>` per file. `--check` writes nothing, prints `drift <out>` / `missing <out>` / `orphan <path>` (files under `owns` that no output names), exits 1 if any. Exit 0 ok, 1 drift or error, 2 usage. `--channel` limits both modes to one channel; an unknown channel exits 2.
+- `tests/helpers/schema-lite.mjs`: export `checkSchema(doc, schema)` returning an array of error strings (`<json pointer>: <reason>`). Support `type` (string or array), `required`, `properties`, `additionalProperties` (false or a schema), `patternProperties`, `enum`, `const`, `pattern`, `minLength`, `maxLength`, `minimum`, `maximum`, `items` (schema), `minItems`, `maxItems`, `uniqueItems`, `allOf`, `anyOf`, `oneOf` (exactly one branch with zero errors), `not`, and local `$ref` (`#/definitions/...`, `#/$defs/...`). Ignore `format`, `$schema`, `$id`, `description`, `title`, `default`. State in a one-line comment that it is not a full draft-07 validator.
+- Fixtures: `tests/fixtures/packaging/demo/target.json` with two outputs (one with `{{version}}` in its path) and `owns`, and `demo.txt.tmpl` using every placeholder.
+- `tests/packaging-render.test.mjs`: render the demo channel into a temp root (copy `packaging/VERSION` and `packaging/SHA256SUMS` there; pass `--templates tests/fixtures/packaging`), then `--check` exits 0; mutate an output: `--check` exits 1 and names it; an extra file under `owns`: `orphan`; an unknown placeholder, a missing hash line, and a CR in `SHA256SUMS` each exit 1 with a message; `--channel nope` exits 2; the SRI for the empty-input digest `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` equals `sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=`; the real `packaging/SHA256SUMS` parses to the two digests above. `schema-lite` unit cases: a valid document passes (positive control), and each of a missing required key, an extra key under `additionalProperties: false`, a bad enum, a pattern miss, a `$ref` target violation, and a `oneOf` with two matches fails with a pointer.
+
+RED: `timeout 120 bun test --timeout 30000 tests/packaging-render.test.mjs` exits 1 before the files exist. GREEN: same command exits 0.
+
+## C02 (T02): sh bundle and split, owner `chef`
+
+A mechanical, behaviour-preserving split. No new behaviour, no new flags (T04 does that).
+
+- `scripts/installer/build.mjs` (Bun, no dependency): `bun scripts/installer/build.mjs [--target sh|ps1|all] [--check] [--out DIR] [--root DIR]`. Defaults: `--target all`, root is the repo root (two levels above the script), out is the root. For each target read `<root>/scripts/installer/<target>/ORDER` (one file name per line; blank lines and `#` lines ignored); a missing `ORDER` for a requested target is an error (exit 1, name the path), so `--target ps1` fails until T03. A file named in `ORDER` but missing, or a `.sh`/`.ps1` file in the folder that `ORDER` does not name, is an error. sh output `install.sh`: line 1 `#!/usr/bin/env bash`, line 2 `# Generated by scripts/installer/build.mjs from scripts/installer/sh/; edit the parts, then run bun scripts/installer/build.mjs.`, then each part with its first line removed when that line starts with `# shellcheck shell=bash`, parts joined by one newline, file ending in exactly one newline, mode 0755. ps1 output (used by T03): `install.ps1`, line 1 `# Generated by scripts/installer/build.mjs from scripts/installer/ps1/; edit the parts, then run bun scripts/installer/build.mjs.`, then parts verbatim, mode 0644. Write mode prints `built <path>`. `--check` writes nothing, prints `drift <path>` or `missing <path>`, exits 1 if any. Exit 2 on usage errors (unknown flag or target).
+- `scripts/installer/sh/ORDER`: `lib.sh args.sh platform.sh fetch.sh binary.sh pathenv.sh shell.sh db.sh shims.sh mcp.sh modes.sh main.sh`, one per line.
+- Parts: every part's first line is `# shellcheck shell=bash disable=SC2034,SC2154`. Move today's `install.sh` code verbatim, in today's order, as top-level statements (no new functions):
+  - `lib.sh`: the description comment (today's lines 2-6), `set -euo pipefail`, then `note()` (today's line 141, moved up; it only prints).
+  - `args.sh`: lines 8-59 (defaults, `print_usage`, `usage`, the argument loop) and the path validation loop, lines 63-69.
+  - `platform.sh`: line 78 (`target=...`).
+  - `fetch.sh`: lines 60-62 (tool checks), 70-77 (curl options, version), 79-89 (archive names, temp dir, trap, downloads, checksum).
+  - `binary.sh`: lines 90-111 (entry checks, extraction, binary placement, shell bundle detection, `snipset-shims` placement).
+  - `pathenv.sh`: lines 112-117. `shell.sh`: lines 118-139 (including `rm -rf "$stage"`). `db.sh`: lines 140, 142-152. `shims.sh`: lines 153-168. `mcp.sh`: lines 169-183. `modes.sh`: header line only. `main.sh`: line 184.
+  The tool checks move after the path validation and `target=` line in sequence only if that keeps every existing test green; otherwise keep today's exact order by placing the lines where they were and report the deviation.
+- `install.sh`: regenerate with the build script (this chunk is the one exception that writes the bundle, because it creates it).
+- `tests/install.test.mjs`: replace the `root`/`script` lookup with `installerPath("sh")` from `tests/helpers/install-sandbox.mjs`. No other change.
+- `tests/installer-build.test.mjs`: `build.mjs --check --target sh` exits 0 on the repo; on a temp copy (`--root`) a one-character edit in a part makes `--check` exit 1 naming `install.sh`, and building again makes it exit 0; every part passes `bash -n`; every part starts with the shellcheck header; the bundle starts with the shebang and the notice; `ORDER` names exactly the part files; a missing `ORDER` for `--target ps1` exits 1; an unknown target exits 2; the bundle prints the same usage lines as before (assert each line of today's usage text is present).
+
+RED: `timeout 120 bun test --timeout 30000 tests/installer-build.test.mjs` exits 1. GREEN: that file plus `tests/install.test.mjs` exit 0 (17 pass); `bun scripts/installer/build.mjs --check --target sh`, `shellcheck -S warning install.sh`, and `bash -c 'shellcheck -S warning scripts/installer/sh/*.sh'` exit 0.
+
+## C18 (T18): Scoop bucket, owner `nappy`
+
+Files: `packaging/templates/scoop/target.json` (`outputs: [{ template: "snipset.json.tmpl", out: "bucket/snipset.json" }]`, `owns: "bucket"`), `packaging/templates/scoop/snipset.json.tmpl`, `bucket/snipset.json` (rendered with `bun scripts/packaging/render.mjs --channel scoop`), `tests/packaging-scoop.test.mjs`. Read-only input: `tests/fixtures/schemas/scoop.schema.json` (vendored) and `tests/helpers/schema-lite.mjs`.
+
+Manifest: `version` `{{version}}`; `description` "Terminal companion for the Snipset snippet manager"; `homepage` `https://github.com/belajarcarabelajar/snipset-cli` (required by `checkver: "github"`); `license` `{ "identifier": "Proprietary", "url": "https://github.com/belajarcarabelajar/snipset-cli/blob/main/LICENSE" }`; `architecture.64bit.url` `{{url.windows}}`, `architecture.64bit.hash` `{{sha256.windows}}`; `bin` `snipset.exe`; `checkver` `github`; `autoupdate.architecture.64bit.url` the same URL with Scoop's own `$version` variable; `autoupdate.hash.url` `$baseurl/SHA256SUMS`. No `arm64` key anywhere (Windows 11 arm64 then falls back to the x64 entry). Source: research note "Scoop".
+
+Test: the rendered file parses as JSON and passes `checkSchema` against the vendored schema (positive control), a copy with an extra top-level key fails it (negative control); the hash equals the Windows line of `packaging/SHA256SUMS`; the URL names the asset for `packaging/VERSION`; `bucket/` holds only `snipset.json`; the string `arm64` appears nowhere; `render.mjs --check --channel scoop` exits 0.
+
+## C19 (T19): winget manifests, owner `hoggy`
+
+Files: `packaging/templates/winget/target.json` (three outputs under `packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/{{version}}/`: `BCBAcademy.SnipsetCLI.yaml`, `BCBAcademy.SnipsetCLI.installer.yaml`, `BCBAcademy.SnipsetCLI.locale.en-US.yaml`; `owns: "packaging/winget"`), `version.yaml.tmpl`, `installer.yaml.tmpl`, `locale.yaml.tmpl`, the three rendered files, `tests/packaging-winget.test.mjs`. Read-only: the three vendored 1.12.0 schemas and `schema-lite`.
+
+Each file starts with `# yaml-language-server: $schema=https://aka.ms/winget-manifest.<version|installer|defaultLocale>.1.12.0.schema.json`, then `PackageIdentifier: BCBAcademy.SnipsetCLI`, `PackageVersion: {{version}}`, ..., `ManifestType: <version|installer|defaultLocale>`, `ManifestVersion: 1.12.0`. Version file: `DefaultLocale: en-US`. Locale file: `PackageLocale: en-US`, `Publisher: PT BCB Academy Indonesia`, `PackageName: Snipset CLI`, `License: Proprietary`, `LicenseUrl`, `ShortDescription` (3 to 256 characters), `Moniker: snipset`, `PublisherUrl` and `PackageUrl` the repo URL. Installer file: `InstallerType: zip`, `NestedInstallerType: portable`, `NestedInstallerFiles: [{ RelativeFilePath: snipset.exe, PortableCommandAlias: snipset }]`, `Installers: [{ Architecture: x64, InstallerUrl: {{url.windows}}, InstallerSha256: {{sha256.windows.upper}} }]`. Source: research note "winget".
+
+Test: each file parses with `Bun.YAML.parse` and passes `checkSchema` against its vendored schema (positive control; a copy missing `PackageIdentifier` fails, negative control); `paths match the identifier and version` (folder `b/BCBAcademy/SnipsetCLI/<version>`, file names from the identifier); the header line names the matching schema; `NestedInstallerType` is present because the type is zip; the sha equals `packaging/SHA256SUMS` (case-insensitive); `render.mjs --check --channel winget` exits 0.
+
+## C20 (T20): AUR package, owner `chef`
+
+Files: `packaging/templates/aur/target.json` (outputs `packaging/aur/snipset-cli/PKGBUILD` and `packaging/aur/snipset-cli/.SRCINFO`, `owns: "packaging/aur"`), `PKGBUILD.tmpl`, `SRCINFO.tmpl`, the two rendered files, `tests/packaging-aur.test.mjs`. Use `fakeLinuxRelease` from `tests/helpers/install-sandbox.mjs` for the build test.
+
+PKGBUILD: maintainer comment line; `pkgname=snipset-cli` (not `-bin`: nonfree packages without sources must not use it); `pkgver={{version}}`; `pkgrel=1`; `pkgdesc`; `arch=('x86_64')`; `url`; `license=('LicenseRef-Snipset-EULA')`; `depends=('glibc' 'gcc-libs' 'openssl' 'zlib' 'brotli' 'zstd')` (from the measured `ldd` list); `options=('!strip' '!debug')`; `source_x86_64=("snipset-cli-$pkgver-x86_64.tar.gz::https://github.com/belajarcarabelajar/snipset-cli/releases/download/v$pkgver/snipset-cli-v$pkgver-x86_64-unknown-linux-gnu.tar.gz")`; `sha256sums_x86_64=('{{sha256.linux}}')`; `package()` installs `snipset` to `/usr/bin/snipset` (0755), `shell/snipset-shims.sh` to `/usr/bin/snipset-shims` (0755), `shell/completion.bash` to `/usr/share/bash-completion/completions/snipset.bash` (0644), `shell/snipset.sh` and `shell/tab.sh` to `/usr/share/snipset-cli/` (0644), `LICENSE` to `/usr/share/licenses/snipset-cli/LICENSE` (0644). `.SRCINFO` template must equal `makepkg --printsrcinfo` output for the rendered PKGBUILD byte for byte.
+
+Test (makepkg cases skip with a printed reason when `makepkg` or `fakeroot` is absent, never a silent pass): `SRCINFO equals makepkg --printsrcinfo` (run in a temp dir on a copy); a build from a `file://` fixture tarball: copy the PKGBUILD into a temp dir, replace the source URL with `file://<fixture>` and the checksum with the fixture's, run `makepkg --nodeps --noconfirm --noprogressbar -f` with `HOME`, `PKGDEST`, `SRCDEST`, `SRCPKGDEST`, `LOGDEST`, `BUILDDIR` all inside the temp dir, then list the package with `bsdtar -tf` and assert the five installed paths; the name has no `-bin`; the checksum equals `packaging/SHA256SUMS`; `render.mjs --check --channel aur` exits 0; `shellcheck --shell=bash --exclude=SC2034,SC2154,SC2164 packaging/aur/snipset-cli/PKGBUILD` exits 0.
+
+## C21 (T21): Homebrew formula, owner `nappy`
+
+Files: `packaging/templates/homebrew/target.json` (output `Formula/snipset.rb`, `owns: "Formula"`), `snipset.rb.tmpl`, `Formula/snipset.rb`, `tests/packaging-homebrew.test.mjs`.
+
+Formula: `class Snipset < Formula`, `desc`, `homepage`, `url "{{url.linux}}"`, `sha256 "{{sha256.linux}}"`, `version "{{version}}"`, a `license` value only if docs.brew.sh documents one for proprietary software (check the License Guidelines page with TinyFish `search` then `fetch_content`, all five params, and cite it in your report; otherwise omit `license`), `depends_on :linux`, an `on_arm` block that `odie`s with "Snipset CLI has no ARM build yet" if the Formula Cookbook documents `on_arm` inside `def install` or at class level (cite; otherwise check `Hardware::CPU.arm?` in `install`), `livecheck do url :stable; strategy :github_latest end`, `def install` with `bin.install "snipset"`, `bin.install "shell/snipset-shims.sh" => "snipset-shims"`, `bash_completion.install "shell/completion.bash" => "snipset"`, `pkgshare.install "shell/snipset.sh", "shell/tab.sh"`, and `test do assert_match "snipset #{version}", shell_output("#{bin}/snipset --version") end`.
+
+Test: structural checks on the rendered file (class name, url, sha256 equal to `packaging/SHA256SUMS`, `depends_on :linux`, every install line, the test block); `ruby -c Formula/snipset.rb` runs only when `ruby` is on PATH (absent here: skip with a printed reason); `render.mjs --check --channel homebrew` exits 0.
+
+## C22 (T22): Nix flake, owner `hoggy`
+
+Files: `packaging/templates/nix/target.json` (output `flake.nix`), `flake.nix.tmpl`, `flake.nix`, `tests/packaging-nix.test.mjs`.
+
+Flake: `description`; `inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"`; `outputs` with `pkgs = import nixpkgs { system = "x86_64-linux"; config.allowUnfree = true; }`; `packages.x86_64-linux.default` from `pkgs.stdenv.mkDerivation` with `pname = "snipset-cli"`, `version = "{{version}}"`, `src = pkgs.fetchurl { url = "{{url.linux}}"; hash = "{{sri.linux}}"; }`, `sourceRoot = "."` (the tarball's only directory is `shell/`, so unpack would otherwise enter it), `nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.installShellFiles ]`, `buildInputs = [ pkgs.openssl pkgs.zlib pkgs.brotli pkgs.zstd pkgs.stdenv.cc.cc.lib ]`, an `installPhase` that installs `snipset` and `shell/snipset-shims.sh` (as `snipset-shims`) to `$out/bin` and runs `installShellCompletion --bash --name snipset.bash shell/completion.bash`, `meta = { license = pkgs.lib.licenses.unfree; sourceProvenance = [ pkgs.lib.sourceTypes.binaryNativeCode ]; platforms = [ "x86_64-linux" ]; mainProgram = "snipset"; }`; `apps.x86_64-linux.default` pointing at `bin/snipset`. Source: research note "Zero-manifest channels".
+
+Test: the SRI in `flake.nix` equals `sha256-` plus base64 of the Linux digest in `packaging/SHA256SUMS` (compute it in the test); structural checks for `sourceRoot = "."`, `autoPatchelfHook`, `allowUnfree = true`, `binaryNativeCode`, the URL; balanced braces and brackets outside strings; `nix flake check` runs only when `nix` is on PATH (absent here: skip with a printed reason); `render.mjs --check --channel nix` exits 0.
+
+## C03 (T03): ps1 bundle and split, owner `chef`
+
+Behaviour-preserving, but a `try { } finally { }` cannot span part files and still parse per part, so today's flow moves into functions.
+
+- `scripts/installer/ps1/ORDER`: `params.ps1 lib.ps1 platform.ps1 fetch.ps1 binary.ps1 path.ps1 mcp.ps1 modes.ps1 main.ps1`.
+- `params.ps1`: today's lines 1-6 verbatim. `lib.ps1`: lines 7-11 (`$ErrorActionPreference`, the TLS comment and line, `$repo`, `$baseUrl`). `platform.ps1`: line 16 as `$script:target = ...`. `fetch.ps1`: function `Resolve-SnipsetVersion` (lines 12-15) and function `Get-SnipsetRelease -Temp <dir>` (downloads and checksum, lines 23-31, returning the zip path). `binary.ps1`: functions `Test-SnipsetArchive -Zip` (lines 32-41) and `Install-SnipsetBinary -Zip -Stage -InstallDir` (lines 42-47). `path.ps1`: function `Add-SnipsetToUserPath -Dir` (lines 49-50, unchanged logic; T15 replaces it). `mcp.ps1`: one comment line only. `modes.ps1`: function `Invoke-SnipsetInstall` holding the temp and stage variables and the `try`/`finally` of lines 17-22 and 52-56, calling the functions above. `main.ps1`: `Invoke-SnipsetInstall`.
+- Every message, URL, regex, and exit behaviour stays identical; script-scope state uses `$script:`.
+- `install.ps1`: regenerate with `bun scripts/installer/build.mjs --target ps1` (this chunk creates the ps1 bundle).
+- `tests/install-ps1.test.mjs`: `installScript` comes from `installerPath("ps1")`; nothing else changes.
+- `tests/installer-build.test.mjs`: add cases: `--check --target ps1` exits 0; every ps1 part parses with `[System.Management.Automation.Language.Parser]::ParseFile` and 0 errors (skip with a printed reason when pwsh is absent); the ps1 bundle line 1 is the notice; `ORDER` names exactly the ps1 parts.
+
+RED: `bun scripts/installer/build.mjs --check --target ps1` exits 1 (no ORDER yet). GREEN: `timeout 120 bun test --timeout 60000 tests/installer-build.test.mjs tests/install-ps1.test.mjs` exit 0 (the three ps1 tests pass) and `pwsh -NoProfile -NonInteractive -File tests/install.Tests.ps1` prints `PowerShell installer contract passed`; `--check --target ps1` exit 0.
+
+## C04 (T04): sh CLI contract, owner `nappy`
+
+Turn the T02 parts into the function interface of the plan's Contract section (part table), add the new flags and the mode dispatch. Feature behaviour stays as today; later chunks fill the new functions.
+
+- `lib.sh`: `set -euo pipefail`; `note MSG` (stderr `install.sh: MSG`); `die MSG [CODE]` (note then exit, default 1); `report STATUS ITEM DETAIL` printing `[STATUS] ITEM: DETAIL` to stdout and counting `n_drift` (DRIFT, MISSING), `n_kept` (KEEP), `n_removed` (REMOVED); `act DESC CMD...` runs `CMD...`, or with `dry_run=1` prints `[DRY] DESC` and returns 0.
+- `args.sh`: `print_usage` (today's lines plus `--with-mcp[=LIST]`, `--from DIR`, `--dry-run`, `--check`, `--update`, `--uninstall`, one short line each), `usage` (stderr, exit 2), `parse_args "$@"` setting `version install_dir share_dir bashrc db add_path do_init do_shell do_shims mcp_list from_dir mode dry_run base_url`. `mode` is `install` unless one of `--check`, `--update`, `--uninstall` (a second one is a usage error). `--with-mcp` and `--with-mcp=` set `mcp_list=opencode`; `--with-mcp=LIST` takes a comma list of `claude codex gemini opencode cursor vscode`, `all` expands to all six, an unknown id is a usage error. `--from DIR` needs a value. Today's path validation also covers `from_dir`.
+- Every feature part becomes the functions named in the part table, holding today's code: `platform_require` (sets `target`), `fetch_tools_require`, `fetch_get URL OUT` and `fetch_text URL` (curl with today's options), `sha256_of FILE`, `fetch_resolve_version`, `fetch_release DIR`, `binary_verify DIR`, `binary_stage DIR`, `binary_place`, `pathenv_add`, `shell_bundle_place`, `shell_block_add`, `db_init`, `shims_generate`, `mcp_install`. New functions are minimal: `platform_glibc_version` prints nothing; `binary_smoke` returns 0; `binary_installed_version` prints nothing; every `*_check` and `*_remove` prints `[SKIP] <item>: not checked yet` and returns 0.
+- `modes.sh`: `do_install` runs the Contract's step order (the list in the plan's Task T04 Interfaces). With `dry_run=1` it calls no writer and no downloader: it prints one `[DRY]` line per step (naming the install dir, share dir, startup files, and each MCP id in `mcp_list`) and ends with `dry run: nothing was written`. `do_check` calls every `*_check` and prints `check: CURRENT` or `check: DRIFT (<n> items)` with exit 0 or 1. `do_update` calls `do_install`. `do_uninstall` calls every `*_remove` in reverse order and prints `uninstall: removed <n>, kept <m>`.
+- `main.sh`: `parse_args "$@"`, then dispatch on `mode`; the final `Installed snipset ...` line stays in `do_install`.
+- `tests/install-cli.test.mjs` (use the T01 helper): `--help` and `-h` list every old and new flag and exit 0; an unknown flag, `--check --uninstall`, `--with-mcp=bogus`, and `--from` with no value each exit 2 with usage on stderr; `--dry-run --version 0.1.0` exits 0, prints `[DRY]` lines and `dry run: nothing was written`, makes no downloader call (`readDownloads`), and leaves the sandbox HOME snapshot unchanged; `--dry-run --with-mcp` names `opencode` only; `--dry-run --with-mcp=claude,codex` names both; `--dry-run --with-mcp=all` names all six.
+
+Do not write `install.sh`: run your tests through `installerPath("sh")`, which builds a fresh bundle. RED: `timeout 120 bun test --timeout 30000 tests/install-cli.test.mjs` exits 1. GREEN: that file plus `tests/install.test.mjs` exit 0 (17 pass); `bash -n` on every part exits 0.
