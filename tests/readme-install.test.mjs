@@ -84,6 +84,7 @@ describe("README install coverage", () => {
     for (const [index, [channel, status]] of expected.entries()) {
       const text = rows[index][1];
       expect({ channel, status: text.match(/^(verified|not verified|not submitted|not published)\b/)?.[1] }).toEqual({ channel, status });
+      expect({ channel, reason: /^(verified|not verified|not submitted|not published)( on Windows)?: \S/.test(text) }).toEqual({ channel, reason: true });
     }
   });
 
