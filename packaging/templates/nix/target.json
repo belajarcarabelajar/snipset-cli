@@ -1,0 +1,3 @@
+{
+  "outputs": [{ "template": "flake.nix.tmpl", "out": "flake.nix" }]
+}

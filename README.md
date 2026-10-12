@@ -1,51 +1,251 @@
 # Snipset CLI
 
-Install the `snipset` terminal companion on Linux x64 or Windows x64 from public release assets. This repository contains installation scripts and release documentation; the CLI implementation and native builds remain private.
+Install the `snipset` terminal companion on Linux x64 or Windows x64 from release assets. This repository holds the installers, the package manifests, and the release documentation. The CLI source and the native builds are private.
+
+The v0.2.0 release is a Draft until it is published. Until then only the owner can download it, so every channel below fails for other users. See [Known limits](#known-limits).
+
+## Install matrix
+
+Status on 2026-10-12.
+
+| Channel | Status |
+| --- | --- |
+| `install.sh` on Arch Linux x86_64 | verified: the sandboxed installer suites (`tests/install*.test.mjs`) plus an install of the real v0.2.0 assets in a temp HOME (`tests/install-real-assets.test.mjs`) |
+| `install.sh` on Debian, Ubuntu, Fedora, WSL | not verified: no container runs; glibc 2.34 and OpenSSL 3 are required |
+| `install.sh --from` (offline) | verified: same runs as above |
+| `install.ps1` on Windows x64 | not verified on Windows: runs under PowerShell 7.6.6 on Linux against fixtures and the real zip, which proves runtime faults only |
+| Scoop | not verified: no Windows; the manifest passes the vendored Scoop schema |
+| winget | not submitted: the manifests pass the vendored 1.12.0 schemas |
+| AUR | not published: the package builds with makepkg on Arch from the real tarball, and its binary runs |
+| Homebrew tap | not verified: brew is absent; structural checks only |
+| Nix flake | not verified: nix is absent; structural checks and the hash only |
+| mise, eget, ubi | not verified: the tools are absent |
+| `gh release download` | verified: owner account, Draft release |
 
 ## Linux x64
 
-Inspect the installer before running it, then install a pinned release:
+Download the installer, read it, then install a pinned release. The `v0.2.0` URL works once that tag exists; the tag is created when the Draft release is published.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/main/install.sh -o install-snipset.sh
+curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.sh -o install-snipset.sh
 less install-snipset.sh
 bash install-snipset.sh --version v0.2.0 --add-path
 ```
 
-The default destination is `~/.local/bin`. Use `--install-dir DIR` for another user-owned directory. The installer validates the archive checksum and executable before replacing an existing installation.
-
-A fresh install also sets up a working station: it creates a standalone database (`snipset init`), installs the shell bundle (helpers, completion, TAB expansion, Enter trigger) with a marker-guarded block in `~/.bashrc`, and generates trigger shims next to the binary. Each step is idempotent and strictly opt-out:
+The copy on `main` works too. It gets installer fixes before the next tag:
 
 ```sh
-bash install-snipset.sh --version v0.2.0 --add-path --with-mcp
+curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/main/install.sh -o install-snipset.sh
+```
+
+The installer needs x86_64, glibc 2.34 or newer, OpenSSL 3 (`libcrypto.so.3`), bash 4.4 or newer, `tar`, `curl` or `wget`, and one of `sha256sum`, `shasum`, or `openssl`. It refuses another OS, CPU, or libc (macOS, ARM, musl, glibc older than 2.34) before it downloads anything. A missing `libcrypto.so.3` is caught when the new binary is test-run, after the download and before anything is replaced; an empty install directory can remain.
+
+The default destination is `~/.local/bin`. The installer checks the archive against `SHA256SUMS` and runs the new binary before it replaces an existing one.
+
+A fresh install also sets up a working station. It creates a standalone database (`snipset init`), installs the shell bundle (helpers, completion, TAB expansion, Enter trigger) with a marked block in `~/.bashrc`, and generates trigger shims next to the binary. Each step can run again without harm, and each one can be turned off:
+
+```sh
+bash install-snipset.sh --version v0.2.0 --add-path --with-mcp=claude,opencode
 bash install-snipset.sh --version v0.2.0 --no-init --no-shell --no-shims
 ```
 
+Releases without the shell bundle ship the binary only. The installer then skips shell integration and shims with a note and still exits 0; the database, PATH, and MCP steps still run.
+
+### Setup flags
+
 | Flag | Effect |
 | --- | --- |
-| `--share-dir DIR` | Shell bundle destination (default `~/.local/share/snipset`). |
-| `--db PATH` | Database used for init, shims, and the MCP config (default: the CLI default). |
-| `--bashrc PATH` | Shell startup file for integration (default `~/.bashrc`). |
+| `--version VERSION` | Release to install. Default: the latest release. |
+| `--install-dir DIR` | Binary destination. Default: `~/.local/bin`. |
+| `--add-path` | Add the install dir to PATH for bash, zsh, and fish. See [Shells and PATH](#shells-and-path). |
+| `--share-dir DIR` | Shell bundle destination. Default: `~/.local/share/snipset`. |
+| `--db PATH` | Database for init, shims, and MCP. Default: the CLI default. |
+| `--bashrc PATH` | Shell startup file for the integration block. Default: `~/.bashrc`. |
 | `--no-init` | Skip creating the standalone database. |
 | `--no-shell` | Skip shell integration. |
 | `--no-shims` | Skip generating trigger shims. |
-| `--with-mcp` | Write `~/.config/opencode/opencode.json` when absent (never overwrites). |
+| `--with-mcp` | Same as `--with-mcp=opencode`: write `~/.config/opencode/opencode.json` when it is absent. |
+| `--with-mcp=LIST` | Register MCP for a comma list of `claude`, `codex`, `gemini`, `opencode`, `cursor`, `vscode`, or `all`. See [MCP registration](#mcp-registration). |
+| `--from DIR` | Install from `SHA256SUMS` and the archive in DIR. No download. See [Offline install](#offline-install). |
+| `--dry-run` | Print every step and write nothing. |
+| `--check` | Report drift of an install made with the same flags. |
+| `--update` | Install the latest release (or `--version`) over the current one. |
+| `--uninstall` | Remove what an install with the same flags wrote. |
+| `--help`, `-h` | Show the help and exit 0. |
 
-Releases before the shell bundle ship the binary only; the installer then skips the setup steps with a note and still exits zero.
+## Check, update, uninstall, dry run
+
+| Mode | What it does |
+| --- | --- |
+| `--check` | Writes nothing (with `--with-mcp=claude`, the `claude` CLI updates its own state, see [Known limits](#known-limits)). Prints one line per item: binary, shell files, database, shims, PATH, MCP. Ends with `check: CURRENT` or `check: DRIFT (N items)`. |
+| `--update` | Installs the latest release, or the one in `--version`, over the current one. Does nothing when that version is already installed. |
+| `--uninstall` | Removes what an install with the same flags wrote, including MCP entries for the `--with-mcp` list you pass. Ends with `uninstall: removed N, kept N`. |
+| `--dry-run` | Prints a `[DRY]` line for every install step and writes nothing. |
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Done. For `--check`: everything is current. |
+| 1 | A required step failed (download, checksum, archive, binary test run, an `[FAIL]` line), the system was refused, or `--check` found drift. A failed `snipset init` or shim generation only prints a note. |
+| 2 | Usage error: an unknown flag, a missing value, two modes at once, or `--dry-run --uninstall`. |
+
+Rules:
+
+- `--check` and `--uninstall` look only where you point them. Pass the same `--install-dir`, `--share-dir`, `--bashrc`, `--db`, and `--with-mcp` flags you used for the install. `--check` also needs `--add-path` to check PATH.
+- `--dry-run --uninstall` is refused, because the remove steps cannot be previewed. Run `--check` to see what is installed.
+- The database is never removed.
+- Empty directories may remain after uninstall, for example `~/.local/bin`.
+
+```sh
+bash install-snipset.sh --check --add-path --with-mcp=claude,opencode
+bash install-snipset.sh --update --add-path --with-mcp=claude,opencode
+bash install-snipset.sh --uninstall --add-path --with-mcp=claude,opencode
+```
+
+## Offline install
+
+`--from DIR` installs from a directory that holds `SHA256SUMS` and the Linux archive. Nothing is downloaded, and the checksum is still checked. Without `--version` the installer reads the version from the files in DIR.
+
+```sh
+gh release download v0.2.0 -R belajarcarabelajar/snipset-cli -D snipset-assets
+bash install-snipset.sh --from snipset-assets --add-path
+```
+
+## Shells and PATH
+
+`--add-path` writes two files, `<share-dir>/env` for sh, bash, and zsh, and `<share-dir>/env.fish` for fish. Each adds the install dir to PATH only when it is not there yet. Then it adds one line to your startup files:
+
+```sh
+. "<share-dir>/env" # snipset-path (managed by snipset installer; safe to remove)
+```
+
+| Shell | File | When |
+| --- | --- | --- |
+| sh and bash login | `~/.profile` | always |
+| bash | `~/.bashrc`, `~/.bash_profile`, `~/.bash_login`, and the `--bashrc` file | when the file exists, and the `--bashrc` file also when shell integration is about to create it |
+| zsh | `$ZDOTDIR/.zshenv`, or `~/.zshenv` without `ZDOTDIR` | when zsh is your `$SHELL` or is on PATH |
+| fish | `~/.config/fish/conf.d/snipset.fish` (honours `XDG_CONFIG_HOME`), which sources `<share-dir>/env.fish` | when fish is your `$SHELL` or is on PATH |
+
+A second run does not add the line twice. `--uninstall` removes the exact line from each file, and deletes the env files when they still match what the installer wrote.
+
+If `<share-dir>/env`, `<share-dir>/env.fish`, or the fish file already exists and was not written by the installer, it is kept: the installer prints `[KEEP]` with the line to add by hand, and adds no source line that would run your file.
+
+Older installers wrote `export PATH="<install-dir>:$PATH"` into `~/.profile`. That line has no marker and may be your own, so uninstall keeps it and prints a hint: `[KEEP] path legacy line: ... remove it by hand if the old installer added it`.
+
+## MCP registration
+
+`--with-mcp=LIST` on Linux and `-WithMcp LIST` on Windows register the `snipset mcp` server with these six ids. `all` means all six. `<bin>` is the installed binary; `--db PATH` is added when you pass it.
+
+| Id | Install | Uninstall |
+| --- | --- | --- |
+| `claude` | `claude mcp add --scope user snipset -- <bin> mcp` | `claude mcp remove --scope user snipset` |
+| `codex` | `codex mcp add snipset -- <bin> mcp` | `codex mcp remove snipset` |
+| `gemini` | `gemini mcp add --scope user snipset <bin> mcp` | `gemini mcp remove --scope user snipset` |
+| `opencode` | writes `~/.config/opencode/opencode.json` when it is absent | deletes the file only when it still matches what the installer wrote |
+| `cursor` | writes `~/.cursor/mcp.json` when it is absent; otherwise prints the entry to add by hand | deletes the file only when it still matches what the installer wrote |
+| `vscode` | `code --add-mcp '{"name":"snipset","command":"<bin>","args":["mcp"]}'` | not removed; delete `snipset` from the VS Code `mcp.json` by hand |
+
+- Nothing is overwritten. An existing `snipset` entry is kept, even when it points elsewhere. An existing `opencode.json` or `mcp.json` is left untouched.
+- Claude and Gemini use user scope only. A project or local entry is reported and left alone.
+- When a CLI (`claude`, `codex`, `gemini`, `code`) is not on PATH, that id is skipped with a note.
+- The VS Code file is `~/.config/Code/User/mcp.json` on Linux and `%APPDATA%\Code\User\mcp.json` on Windows.
 
 ## Windows x64
 
-Run PowerShell without administrator privileges:
+Run PowerShell without administrator rights:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/main/install.ps1).Content)) -Version v0.2.0 -AddPath
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.ps1).Content)) -Version v0.2.0 -AddPath
 ```
 
-The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script for review when your policy requires it. Use `-InstallDir` for another user-owned location. The PowerShell installer ships the binary only; terminal shell integration is a Linux feature.
+The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script and read it first when your policy requires it. The script sets TLS 1.2 for GitHub downloads. It ships the binary only; shell integration is a Linux feature.
+
+| Parameter | Effect |
+| --- | --- |
+| `-Version` | Release to install, for example `v0.2.0`. Default: the latest release. |
+| `-InstallDir` | Directory for `snipset.exe`. Default: `$env:LOCALAPPDATA\Snipset\bin`. |
+| `-AddPath` | Add the install dir to the User `Path`. |
+| `-WithMcp` | Register MCP for `claude`, `codex`, `gemini`, `opencode`, `cursor`, `vscode`, or `all`. One comma string or several strings. |
+| `-From` | Install from a directory that holds `SHA256SUMS` and the release zip. No download. |
+| `-DryRun` | Print one `[DRY]` line per step and write nothing. |
+| `-Check` | Report whether the install is current. Throws on drift. |
+| `-Update` | Install the requested or latest release over the current one. |
+| `-Uninstall` | Remove `snipset.exe`, the MCP entries for the `-WithMcp` list, and the install dir from the User `Path` when the installer added it (and `snipset.exe` was removed). Never removes the database. |
+
+```powershell
+.\install.ps1 -Check -AddPath -WithMcp claude,codex
+.\install.ps1 -Update
+.\install.ps1 -Uninstall -WithMcp claude,codex
+.\install.ps1 -Version v0.2.0 -From .\snipset-assets
+```
+
+- Use only one of `-Check`, `-Update`, `-Uninstall`. `-DryRun -Uninstall` is refused; run `-Check` instead.
+- Usage errors, refusals, and drift throw, so `pwsh -File install.ps1` ends with status 1. The script never closes the session it runs in.
+- User `Path`: the script reads and writes the raw value in `HKCU\Environment`, so entries such as `%USERPROFILE%\bin` stay unexpanded. It then tells Windows that the environment changed. Open a new terminal to use `snipset`.
+- `-Check` looks at the User `Path` only when you pass `-AddPath`. Pass the same `-InstallDir` and `-WithMcp` as the install.
+
+## Package managers
+
+These install the binary only, plus on Linux the shims generator and bash completion (AUR and Homebrew also install `snipset.sh` and `tab.sh`). None of them runs the setup steps of `install.sh`.
+
+Scoop (Windows), from the `bucket/snipset.json` manifest in this repo:
+
+```powershell
+scoop bucket add snipset https://github.com/belajarcarabelajar/snipset-cli
+scoop install snipset/snipset
+```
+
+winget (Windows). The manifests are not submitted yet. After they are accepted:
+
+```powershell
+winget install BCBAcademy.SnipsetCLI
+```
+
+To test the manifests from a clone, enable local manifests once from an administrator prompt, then install from the directory:
+
+```powershell
+winget settings --enable LocalManifestFiles
+winget install --manifest packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/0.2.0
+```
+
+AUR (Arch Linux). The package is not published yet. After it is, install `snipset-cli` with your AUR helper. Until then, build it from `packaging/aur/snipset-cli`:
+
+```sh
+cd packaging/aur/snipset-cli
+makepkg -si
+```
+
+Homebrew (Linux only), from `Formula/snipset.rb` in this repo:
+
+```sh
+brew tap belajarcarabelajar/snipset https://github.com/belajarcarabelajar/snipset-cli
+brew install belajarcarabelajar/snipset/snipset
+```
+
+Nix (x86_64-linux), from `flake.nix` in this repo:
+
+```sh
+nix run github:belajarcarabelajar/snipset-cli
+```
+
+The package is marked `unfree` because of the EULA in `LICENSE`. The flake imports nixpkgs with `allowUnfree = true` for its own package, so you do not change your Nix config for it. This was not run, because nix is not installed on the test machine.
+
+Maintainers: every manifest above is rendered from `packaging/VERSION` and `packaging/SHA256SUMS` by `bun scripts/packaging/render.mjs`, and `--check` fails when a committed file differs. After changing the version, delete the previous version's folder under `packaging/winget/manifests` before running `--check`.
+
+## Version managers
+
+These read the GitHub release directly and install the binary only.
+
+```sh
+mise use -g github:belajarcarabelajar/snipset-cli@0.2.0
+eget belajarcarabelajar/snipset-cli --tag v0.2.0 --file snipset --to ~/.local/bin
+ubi -p belajarcarabelajar/snipset-cli -t v0.2.0 -e snipset -i ~/.local/bin
+```
+
+mise checks the asset with the digest GitHub publishes. eget checks a checksum automatically only from a `<asset>.sha256` file, which this release does not have. ubi documents no checksum check. Compare with `SHA256SUMS` by hand when you use eget or ubi.
 
 ## Help
 
-Linux installer and live wrapper print usage with `--help` and exit 0:
+The Linux installer and the live wrapper print usage with `--help` and exit 0. A usage error exits 2; most print the usage text, and a few (such as `--dry-run --uninstall` or a malformed `--version`) print one line.
 
 ```sh
 bash install-snipset.sh --help
@@ -53,7 +253,7 @@ bash install-snipset.sh -h
 bash scripts/snipset-live.sh --help
 ```
 
-Windows installer parameters are `-Version`, `-InstallDir`, and `-AddPath`. It requires TLS 1.2 for GitHub downloads and sets it automatically. Show local help with:
+The Windows installer has comment-based help:
 
 ```powershell
 Get-Help ./install.ps1
@@ -96,30 +296,30 @@ value; wrapper flags require a space and `--flag=value` is rejected.
 
 ## Manual downloads
 
-Download the archive for your platform from the release page, download `SHA256SUMS`, verify the matching line, and extract only into a user-owned directory. The Linux asset is `snipset-cli-<version>-x86_64-unknown-linux-gnu.tar.gz` and holds the `snipset` executable plus the `shell/` terminal bundle (`snipset.sh`, `completion.bash`, `tab.sh`, `snipset-shims.sh`) in newer releases. The Windows asset is `snipset-cli-<version>-x86_64-pc-windows-msvc.zip` and holds `snipset.exe` only.
+Download the archive for your platform and `SHA256SUMS` from the release page. Check the archive against its line in `SHA256SUMS`, then extract it only into a directory you own.
 
-The CLI works against a standalone database created by `snipset init`, or against an existing compatible database created by Snipset Desktop; it never migrates a schema it does not own. Clipboard, journal, pomodoro, note, and task operations that use the live bridge require the desktop app to be running. Database-only operations can work while the app is closed.
+The Linux asset `snipset-cli-v0.2.0-x86_64-unknown-linux-gnu.tar.gz` holds the `snipset` executable, `LICENSE`, and the `shell/` bundle (`snipset.sh`, `completion.bash`, `tab.sh`, `snipset-shims.sh`).
+
+The Windows asset `snipset-cli-v0.2.0-x86_64-pc-windows-msvc.zip` holds `snipset.exe` and `LICENSE`.
+
+The CLI works against a standalone database created by `snipset init`, or against an existing compatible database created by Snipset Desktop. It never migrates a schema it does not own. Clipboard, journal, pomodoro, note, and task operations that use the live bridge need the desktop app to be running. Database-only operations work while the app is closed.
+
+## Known limits
+
+- The release is a Draft: until it is published, only the owner can download it, and every channel above fails for others.
+- Linux needs x86_64, glibc 2.34 or newer, `libcrypto.so.3` (OpenSSL 3), and bash 4.4 or newer.
+- macOS, ARM, and musl (Alpine) are refused.
+- Windows 10 on Arm is refused; Windows 11 on Arm runs the x64 build under emulation.
+- The Windows exe is unsigned, so Smart App Control can block it.
+- wget cannot refuse a redirect from https to http; curl can, and the installer uses curl when it is present.
+- `--check` or `--uninstall` with `--with-mcp=claude` runs `claude mcp get`, which updates Claude's own state files.
+- The output formats of `codex`, `gemini`, and VS Code were not observed, and the Windows config paths for Cursor, Codex, and Gemini are inferred.
+- Uninstall may leave empty directories (for example `~/.local/bin` or `~/.config/opencode`); it removes an empty share dir on Linux and an empty install dir on Windows.
+- `--check` needs the same flags as the install.
+- The EULA in `LICENSE` applies to every channel.
 
 ## Updates and uninstall
 
-Run the same installer with a newer pinned version. It validates the new archive before replacing the old executable.
+Use `--update` and `--uninstall` on Linux, or `-Update` and `-Uninstall` on Windows, with the same flags as the install. See [Check, update, uninstall, dry run](#check-update-uninstall-dry-run) and [Windows x64](#windows-x64). Uninstall never deletes a database.
 
-Linux uninstall (the uninstall never deletes a database):
-
-```sh
-rm -f ~/.local/bin/snipset ~/.local/bin/snipset-shims
-rm -f ~/.local/bin/<trigger-shim-name>
-rm -rf ~/.local/share/snipset
-```
-
-Then edit `~/.bashrc` and delete the `snipset-terminal-integration` block, and edit `~/.profile` and delete the install dir PATH line if `--add-path` added one. If you used a custom `--install-dir`, `--share-dir`, or `--bashrc`, remove those paths instead. If you no longer know which trigger shims were generated, list the executable files next to the binary that are not `snipset` or `snipset-shims` and delete only the ones created as snippet triggers.
-
-Windows uninstall (the uninstall never deletes a database):
-
-```powershell
-Remove-Item "$env:LOCALAPPDATA\Snipset\bin\snipset.exe"
-```
-
-If you passed `-AddPath`, remove the install directory from the User `Path` value (search Windows for environment variables, or run `[Environment]::GetEnvironmentVariable('Path','User')` to inspect it). If you used a custom `-InstallDir`, delete `snipset.exe` there instead. The Windows installer ships the binary only, so there is no shell bundle, shim set, or startup file block to clean up.
-
-Initial support is Linux x64 and Windows x64. macOS and ARM builds are not published until native compatibility checks pass.
+If the Windows installer cannot run, remove the install directory from the User `Path` value by hand. Search Windows for environment variables, or inspect the value with `[Environment]::GetEnvironmentVariable('Path','User')`. Then delete `snipset.exe` from the install directory.

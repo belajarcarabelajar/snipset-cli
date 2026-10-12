@@ -1,0 +1,17 @@
+{
+  "outputs": [
+    {
+      "template": "version.yaml.tmpl",
+      "out": "packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/{{version}}/BCBAcademy.SnipsetCLI.yaml"
+    },
+    {
+      "template": "installer.yaml.tmpl",
+      "out": "packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/{{version}}/BCBAcademy.SnipsetCLI.installer.yaml"
+    },
+    {
+      "template": "locale.yaml.tmpl",
+      "out": "packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/{{version}}/BCBAcademy.SnipsetCLI.locale.en-US.yaml"
+    }
+  ],
+  "owns": "packaging/winget"
+}

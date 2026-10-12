@@ -1,0 +1,7 @@
+{
+  "outputs": [
+    { "template": "PKGBUILD.tmpl", "out": "packaging/aur/snipset-cli/PKGBUILD" },
+    { "template": "SRCINFO.tmpl", "out": "packaging/aur/snipset-cli/.SRCINFO" }
+  ],
+  "owns": "packaging/aur"
+}

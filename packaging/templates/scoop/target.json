@@ -1,0 +1,6 @@
+{
+  "outputs": [
+    { "template": "snipset.json.tmpl", "out": "bucket/snipset.json" }
+  ],
+  "owns": "bucket"
+}

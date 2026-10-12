@@ -5,9 +5,11 @@ agent: build
 
 Verify the snipset-cli installers end to end. Run these in order and report exit codes:
 
-1. `bun test tests/install.test.mjs` (must be 2 pass, 0 fail)
+1. `bun test --timeout 30000 tests/install.test.mjs` (must exit 0 with 0 fail)
 2. `bash -n install.sh` (must exit 0)
 3. Static contract scan of `install.ps1`: tokens `SHA256SUMS`, `Get-FileHash`, `Expand-Archive`, `x86_64-pc-windows-msvc`, `LOCALAPPDATA` must all be present, and `Cargo|crates` must be absent.
-4. If Windows `powershell.exe` is reachable, run the contract test: `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$w=(wsl wslpath -w tests/install.Tests.ps1); & $w"`.
+4. `bun scripts/installer/build.mjs --check` (must exit 0: `install.sh` and `install.ps1` match their parts)
+5. `bun scripts/packaging/render.mjs --check` (must exit 0: every rendered package manifest matches its template)
+6. If Windows `powershell.exe` is reachable, run the contract test: `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$w=(wsl wslpath -w tests/install.Tests.ps1); & $w"`.
 
 Do NOT download release archives, do NOT run Rust/Cargo, do NOT touch the real `~/.profile`. Fixture-based temp installs only. Summarize PASS/FAIL per step with fresh evidence.
