@@ -743,7 +743,7 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] F02 quiet reinstall message
   - [ ] F03 ps1 star marker
   - [ ] F04 dedupe MCP stubs
-  - [ ] F05 pin symlinked shims
+  - [x] F05 pin symlinked shims. Evidence: `bun test tests/install-shims.test.mjs` exit 0, 10 pass; mutation (line 38 without `! -L`, private bundle) exit 1, 9 pass 1 fail, the new test failing with `ENOENT lstat .../,k1`.
 
 ## 1. Intent Lock (approved at Gate 1, 2026-10-12)
 

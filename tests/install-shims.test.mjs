@@ -1,6 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -97,6 +97,21 @@ test("uninstall keeps a user file at a listed name and keeps the manifest", asyn
   assert.match(result.stdout, new RegExp(`^\\[KEEP\\] shims: ${join(binDir, ",k1")}: `, "m"));
   assert.equal(existsSync(join(binDir, ";k2")), false, ";k2 survived");
   assert.equal(existsSync(manifest), true, "manifest removed while a listed name remains");
+});
+
+test("uninstall keeps a symlink at a listed name, even one pointing at a shim header", async () => {
+  const { sb, binDir } = await installed();
+  const link = join(binDir, ",k1");
+  const target = join(sb.root, "user-shim");
+  writeFileSync(target, shimBody(",k1"));
+  await rm(link);
+  symlinkSync(target, link);
+  const result = await runInstaller(sb, ["--uninstall"]);
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(lstatSync(link).isSymbolicLink(), true, "symlink removed");
+  assert.equal(readFileSync(target, "utf8"), shimBody(",k1"));
+  assert.match(result.stdout, new RegExp(`^\\[KEEP\\] shims: ${join(binDir, ",k1")}: `, "m"));
+  assert.equal(existsSync(join(binDir, ";k2")), false, ";k2 survived");
 });
 
 test("uninstall never removes an unlisted file, even one with the shim header", async () => {
