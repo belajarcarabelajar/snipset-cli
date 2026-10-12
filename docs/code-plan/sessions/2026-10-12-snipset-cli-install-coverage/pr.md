@@ -40,20 +40,20 @@ Both installers gain a full lifecycle and safer defaults, and the repository gai
 
 ## 4. Local Verification Evidence
 
-Every row ran at `2e4801a` on the machine holding the working tree, before the branch was pushed. PowerShell ran with `POWERSHELL_TELEMETRY_OPTOUT=1`.
+Every row ran at `f7978a6` (after the debt-sweep follow-ups) on the machine holding the working tree, before the follow-ups were pushed; the first pass at `2e4801a` ran before the branch was first pushed. PowerShell ran with `POWERSHELL_TELEMETRY_OPTOUT=1`.
 
 | Gate | Command | Exit | Result |
 |---|---|---|---|
-| Full suite | `bun test --timeout 60000 tests/` | 0 | 511 pass, 6 skip, 0 fail |
-| Without `snipset` and `pwsh` | `env PATH="$HOME/.bun/bin:/usr/bin:/bin" bun test --timeout 60000 tests/` | 0 | 380 pass, 137 skip, 0 fail |
+| Full suite | `bun test --timeout 60000 tests/` | 0 | 522 pass, 6 skip, 0 fail |
+| Without `snipset` and `pwsh` | `env PATH="$HOME/.bun/bin:/usr/bin:/bin" bun test --timeout 60000 tests/` | 0 | 387 pass, 141 skip, 0 fail |
 | Real assets | `SNIPSET_REAL_ASSETS=<gh release download dir> bun test tests/install-real-assets.test.mjs` | 0 | 4 pass |
 | Bundle drift | `bun scripts/installer/build.mjs --check` | 0 | clean |
 | Manifest drift | `bun scripts/packaging/render.mjs --check` | 0 | clean |
-| Shell lint | `shellcheck -S warning install.sh scripts/snipset-live.sh`, every part, the PKGBUILD | 0 | 0 warnings |
+| Shell lint | `shellcheck -S warning install.sh scripts/snipset-live.sh`, every part; the PKGBUILD with `--shell=bash --exclude=SC2034,SC2154,SC2164` (makepkg variables) | 0 | 0 warnings |
 | Shell syntax | `bash -n install.sh` | 0 | clean |
 | PowerShell contract | `pwsh -NoProfile -File tests/install.Tests.ps1` | 0 | contract passed |
-| Plan runner | `ultra-plan-runner.mjs <plan> --execute` | 0 | T01 to T24 SKIPPED-IDEMPOTENT by their own suites, T25 PASSED, empty error ledger |
-| Copy rules | em dash scan of 96 changed files, attribution scan of 55 commit messages | 0 | 0 hits |
+| Plan runner | `SNIPSET_REAL_ASSETS=<dir> ultra-plan-runner.mjs <plan> --execute` | 0 | T01 to T24 and F01 to F05 SKIPPED-IDEMPOTENT by their own suites, T25 PASSED, empty error ledger |
+| Copy rules | em dash scan of 101 changed files, attribution scan of 65 commit messages (at `29a8654`) | 0 | 0 hits |
 
 The six skips: four real-asset tests (opt-in), `nix flake check` (needs nix and network), `ruby -c` (ruby absent). Every task started from a failing test (RED recorded in the plan checklist).
 
