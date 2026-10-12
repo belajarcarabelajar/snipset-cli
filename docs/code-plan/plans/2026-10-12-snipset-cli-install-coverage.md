@@ -655,6 +655,8 @@ Owned by the parent. An item is checked only together with its evidence (command
   - [ ] C10b fish and env file ownership (F1 P1, F2)
   - [ ] C07c refuse a foreign binary before placing (F3, Linux)
   - [ ] C15d refuse a foreign exe before placing (F3, Windows)
+  - [ ] C11d VS Code add and check semantics for kept files (E1, E7)
+  - [ ] README claim corrections (E2 to E6, E8 to E11, the tag note) and the matrix assertion (G3)
 - [ ] Verify locally: full suite, both PATH modes, `pwsh` suite, ShellCheck, `bash -n`, em dash and attribution scans, every exit code 0.
 - [ ] Deliver: commits staged by explicit path under the owner identity, no co-author trailer; PR body written to a file and opened with `--body-file`; `pr-registry.mjs pr install-coverage --number <N>`.
 - [ ] Sweep: session-close debt sweep, learning ledger, graph index, plan closeout decision.
