@@ -459,3 +459,45 @@ test("gemini: the user settings entry for the bin is OK and removed even when th
   assert.deepEqual(removes(sb), [["gemini", "mcp", "remove", "--scope", "user", "snipset"]]);
   assert.deepEqual(results(r.stdout), ["[REMOVED] gemini: snipset"]);
 });
+
+test("gemini: a snipset-dev entry for the bin does not make a foreign snipset entry ours", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: ["gemini"] });
+  seed(sb, "gemini", "/opt/other/snipset");
+  writeFile(
+    join(sb.home, ".gemini", "settings.json"),
+    `${JSON.stringify({ mcpServers: { "snipset-dev": { command: bin, args: ["mcp"] }, snipset: { command: "/opt/other/snipset", args: ["mcp"] } } }, null, 2)}\n`,
+  );
+  const c = await check(sb, { ids: ["gemini"], bin });
+  assert.deepEqual(results(c.stdout), ["[KEEP] gemini: snipset points elsewhere"]);
+  const r = await remove(sb, { ids: ["gemini"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), ["[KEEP] gemini: snipset points elsewhere"]);
+  assert.ok(existsSync(join(sb.home, ".gemini", "settings.json")));
+});
+
+test("gemini: the bin is compared after JSON decoding, so an escaped quote in the path still matches", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: ["gemini"], binDir: "it's bin" });
+  seed(sb, "gemini", bin);
+  // Windows PowerShell 5.1 ConvertTo-Json writes ' as \u0027.
+  writeFile(
+    join(sb.home, ".gemini", "settings.json"),
+    `${JSON.stringify({ mcpServers: { snipset: { command: bin, args: ["mcp"] } } }, null, 2).replaceAll("'", "\\u0027")}\n`,
+  );
+  const c = await check(sb, { ids: ["gemini"], bin });
+  assert.deepEqual(results(c.stdout), [`[OK] gemini: snipset points at ${bin}`]);
+  const r = await remove(sb, { ids: ["gemini"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), [["gemini", "mcp", "remove", "--scope", "user", "snipset"]]);
+  assert.deepEqual(results(r.stdout), ["[REMOVED] gemini: snipset"]);
+});
+
+test("gemini: an unreadable settings file that names snipset is kept", OPTS, async () => {
+  const { sb, bin } = setup({ stubs: ["gemini"] });
+  seed(sb, "gemini", bin);
+  writeFile(join(sb.home, ".gemini", "settings.json"), `{ "mcpServers": { "snipset": { "command": ${JSON.stringify(bin)} \n`);
+  const r = await remove(sb, { ids: ["gemini"], bin });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(removes(sb), []);
+  assert.deepEqual(results(r.stdout), [`[KEEP] gemini: ${join(sb.home, ".gemini", "settings.json")} is not valid JSON; left untouched`]);
+});

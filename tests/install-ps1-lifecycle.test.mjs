@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,9 @@ const zipSkip = pwshSkip || (Bun.which("bsdtar") ? false : "bsdtar not on PATH")
 if (zipSkip) console.warn(`skipping install.ps1 lifecycle tests: ${zipSkip}`);
 
 const bundle = installerPath("ps1");
-const part = (name) => fileURLToPath(new URL(`../scripts/installer/ps1/${name}`, import.meta.url));
+// A private bundle's part directory, so a run can pin parts another chunk is still editing.
+const PARTS_DIR = process.env.SNIPSET_PS1_PARTS ?? fileURLToPath(new URL("../scripts/installer/ps1/", import.meta.url));
+const part = (name) => join(PARTS_DIR, name);
 const MODE_PARTS = ["lib.ps1", "platform.ps1", "fetch.ps1", "binary.ps1", "path.ps1", "mcp.ps1", "modes.ps1"];
 const dotSource = (names) => names.map((name) => `. '${part(name).replaceAll("'", "''")}'`).join("\n");
 const DRY_UNINSTALL = "-DryRun cannot preview -Uninstall; run -Check to see what is installed";
@@ -161,32 +163,141 @@ test("path entry: off Windows the registry helpers report a skip and touch nothi
 });
 
 test("path entry: on Windows add, check, and remove go through the user PATH value once each", { skip: pwshSkip, timeout: 60000 }, async () => {
-  await withWorkspace(async ({ env }) => {
+  await withWorkspace(async ({ env, installDir }) => {
+    await mkdir(installDir);
     const code = [
       dotSource(["lib.ps1", "platform.ps1", "path.ps1"]),
+      "$dir = $env:IDIR",
+      "$marker = Join-Path $dir '.snipset-path-added'",
       "$fake = @{ raw = '%USERPROFILE%\\bin;C:\\Tools'; sets = 0 }",
       "function Test-SnipsetWindowsHost { $true }",
       "function Get-SnipsetUserPath { $fake.raw }",
       "function Set-SnipsetUserPath { param([string]$Raw) $fake.raw = $Raw; $fake.sets++ }",
-      "function Invoke-Probe { param([scriptblock]$Step) $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }; & $Step; \"after: $($fake.raw) sets=$($fake.sets) drift=$($run.drift) removed=$($run.removed)\" }",
-      "Invoke-Probe { Test-SnipsetPathEnv -Dir 'C:\\Snipset\\bin' }",
-      "Invoke-Probe { Install-SnipsetPathEnv -Dir 'C:\\Snipset\\bin' }",
-      "Invoke-Probe { Install-SnipsetPathEnv -Dir 'C:\\Snipset\\bin\\' }",
-      "Invoke-Probe { Test-SnipsetPathEnv -Dir 'C:\\Snipset\\bin' }",
-      "Invoke-Probe { Remove-SnipsetPathEnv -Dir 'c:\\snipset\\bin' }",
-      "Invoke-Probe { Remove-SnipsetPathEnv -Dir 'C:\\Snipset\\bin' }",
+      "function Invoke-Probe { param([scriptblock]$Step) $run = @{ drift = 0; kept = 0; removed = 0; fail = 0 }; & $Step; \"after: $($fake.raw) sets=$($fake.sets) drift=$($run.drift) removed=$($run.removed) marker=$(Test-Path -LiteralPath $marker)\" }",
+      "Invoke-Probe { Test-SnipsetPathEnv -Dir $dir }",
+      "Invoke-Probe { Install-SnipsetPathEnv -Dir $dir }",
+      "Invoke-Probe { Install-SnipsetPathEnv -Dir ($dir + '\\') }",
+      "Invoke-Probe { Test-SnipsetPathEnv -Dir $dir }",
+      "Invoke-Probe { Remove-SnipsetPathEnv -Dir $dir }",
+      "Invoke-Probe { Remove-SnipsetPathEnv -Dir $dir }",
     ].join("\n");
-    const r = await pwsh(["-Command", code], env);
+    const r = await pwsh(["-Command", code], { ...env, IDIR: installDir });
     assert.equal(r.code, 0, r.stderr);
     const after = lines(r.stdout).filter((line) => line.startsWith("after: "));
+    const base = "%USERPROFILE%\\bin;C:\\Tools";
     assert.deepEqual(after, [
-      "after: %USERPROFILE%\\bin;C:\\Tools sets=0 drift=1 removed=0",
-      "after: %USERPROFILE%\\bin;C:\\Tools;C:\\Snipset\\bin sets=1 drift=0 removed=0",
-      "after: %USERPROFILE%\\bin;C:\\Tools;C:\\Snipset\\bin sets=1 drift=0 removed=0",
-      "after: %USERPROFILE%\\bin;C:\\Tools;C:\\Snipset\\bin sets=1 drift=0 removed=0",
-      "after: %USERPROFILE%\\bin;C:\\Tools sets=2 drift=0 removed=1",
-      "after: %USERPROFILE%\\bin;C:\\Tools sets=2 drift=0 removed=0",
+      `after: ${base} sets=0 drift=1 removed=0 marker=False`,
+      `after: ${base};${installDir} sets=1 drift=0 removed=0 marker=True`,
+      `after: ${base};${installDir} sets=1 drift=0 removed=0 marker=True`,
+      `after: ${base};${installDir} sets=1 drift=0 removed=0 marker=True`,
+      `after: ${base} sets=2 drift=0 removed=1 marker=False`,
+      `after: ${base} sets=2 drift=0 removed=0 marker=False`,
     ], r.stdout);
+  });
+});
+
+// Invoke-SnipsetUninstall on a mocked Windows host: the User Path lives in $fake, and
+// IS_SNIPSET decides whether snipset.exe answers --version as snipset.
+function windowsUninstall(steps) {
+  return [
+    dotSource(MODE_PARTS),
+    "$Version = ''; $InstallDir = $env:IDIR; $From = ''; $DryRun = $false; $AddPath = $false",
+    "$marker = Join-Path $InstallDir '.snipset-path-added'",
+    "$fake = @{ raw = $env:RAW; sets = 0 }",
+    "function Test-SnipsetWindowsHost { $true }",
+    "function Get-SnipsetUserPath { $fake.raw }",
+    "function Set-SnipsetUserPath { param([string]$Raw) $fake.raw = $Raw; $fake.sets++ }",
+    "function Test-SnipsetBinary { param([string]$Path) $env:IS_SNIPSET -eq '1' }",
+    ...steps,
+    "try { Invoke-SnipsetUninstall } finally { \"after: $($fake.raw) sets=$($fake.sets) marker=$(Test-Path -LiteralPath $marker)\" }",
+  ].join("\n");
+}
+
+const seedExe = async (installDir) => {
+  await mkdir(installDir, { recursive: true });
+  await writeFile(join(installDir, "snipset.exe"), "snipset.exe fixture\n");
+};
+
+test("path ownership: a dir already on the user PATH at install is kept by uninstall", { skip: pwshSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir }) => {
+    const raw = `C:\\Tools;${installDir}`;
+    const code = windowsUninstall(["Install-SnipsetPathEnv -Dir $InstallDir"]);
+    for (const isSnipset of ["0", "1"]) {
+      await seedExe(installDir);
+      const r = await pwsh(["-Command", code], { ...env, IDIR: installDir, RAW: raw, IS_SNIPSET: isSnipset });
+      assert.equal(r.code, 0, r.stdout + r.stderr);
+      const out = lines(r.stdout);
+      assert.ok(out.includes(`[OK] path: ${installDir} is already on the user PATH`), r.stdout);
+      assert.ok(out.includes(`[KEEP] path: ${installDir} was on the user PATH before the install`), r.stdout);
+      assert.doesNotMatch(r.stdout, /\[REMOVED\] path/);
+      assert.equal(out.at(-1), `after: ${raw} sets=0 marker=False`, r.stdout);
+    }
+  });
+});
+
+test("path ownership: install then uninstall removes the entry the install recorded", { skip: pwshSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir }) => {
+    await seedExe(installDir);
+    const code = windowsUninstall(["Install-SnipsetPathEnv -Dir $InstallDir", "\"recorded=$(Test-Path -LiteralPath $marker)\""]);
+    const r = await pwsh(["-Command", code], { ...env, IDIR: installDir, RAW: "C:\\Tools", IS_SNIPSET: "1" });
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    const out = lines(r.stdout);
+    assert.ok(out.includes("recorded=True"), r.stdout);
+    assert.ok(out.includes(`[REMOVED] path: ${installDir} from the user PATH`), r.stdout);
+    assert.ok(out.includes("uninstall: removed 2, kept 0"), r.stdout);
+    assert.equal(out.at(-1), "after: C:\\Tools sets=2 marker=False", r.stdout);
+  });
+});
+
+test("path ownership: a recorded entry stays on the user PATH while snipset.exe is kept", { skip: pwshSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir }) => {
+    await seedExe(installDir);
+    const code = windowsUninstall(["Install-SnipsetPathEnv -Dir $InstallDir"]);
+    const r = await pwsh(["-Command", code], { ...env, IDIR: installDir, RAW: "C:\\Tools", IS_SNIPSET: "0" });
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    const out = lines(r.stdout);
+    assert.ok(out.some((line) => line.startsWith("[KEEP] binary: ")), r.stdout);
+    assert.ok(out.includes(`[KEEP] path: ${installDir} stays on the user PATH while snipset.exe is kept`), r.stdout);
+    assert.ok(out.includes("uninstall: removed 0, kept 2"), r.stdout);
+    assert.equal(out.at(-1), `after: C:\\Tools;${installDir} sets=1 marker=True`, r.stdout);
+  });
+});
+
+test("uninstall on Windows keeps a symlinked snipset.exe even when it answers --version", { skip: pwshSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ root, env, installDir }) => {
+    await mkdir(installDir);
+    const target = join(root, "real-snipset.exe");
+    await writeFile(target, "snipset.exe fixture\n");
+    await symlink(target, join(installDir, "snipset.exe"));
+    const r = await pwsh(["-Command", windowsUninstall([])], { ...env, IDIR: installDir, RAW: "C:\\Tools", IS_SNIPSET: "1" });
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    const out = lines(r.stdout);
+    assert.ok(out.includes(`[KEEP] binary: ${join(installDir, "snipset.exe")} is not a regular file; left in place`), r.stdout);
+    assert.ok(out.includes("uninstall: removed 0, kept 1"), r.stdout);
+    assert.ok((await lstat(join(installDir, "snipset.exe"))).isSymbolicLink());
+    assert.ok(existsSync(target));
+  });
+});
+
+test("uninstall reports an in-use snipset.exe as FAIL and still prints the summary", { skip: pwshSkip, timeout: 60000 }, async () => {
+  await withWorkspace(async ({ env, installDir }) => {
+    await seedExe(installDir);
+    const inUse = [
+      "function Remove-Item {",
+      "  param([string]$LiteralPath, [switch]$Force, [switch]$Recurse)",
+      "  if ([IO.Path]::GetFileName($LiteralPath) -eq 'snipset.exe') { throw [IO.IOException]::new('The process cannot access the file because it is being used by another process.') }",
+      "  Microsoft.PowerShell.Management\\Remove-Item @PSBoundParameters",
+      "}",
+      "Install-SnipsetPathEnv -Dir $InstallDir",
+    ];
+    const r = await pwsh(["-Command", windowsUninstall(inUse)], { ...env, IDIR: installDir, RAW: "C:\\Tools", IS_SNIPSET: "1" });
+    assert.equal(r.code, 1, r.stdout + r.stderr);
+    const out = lines(r.stdout);
+    assert.ok(out.some((line) => line.startsWith("[FAIL] binary: in use")), r.stdout);
+    assert.ok(out.includes("uninstall: removed 0, kept 1"), r.stdout);
+    assert.equal(out.at(-1), `after: C:\\Tools;${installDir} sets=1 marker=True`, r.stdout);
+    assert.ok(stderrHas(r, "uninstall: 1 steps failed"), r.stderr);
+    assert.ok(existsSync(join(installDir, "snipset.exe")));
   });
 });
 
@@ -224,6 +335,27 @@ test("lifecycle: install, check, uninstall, check, uninstall again with no MCP p
 
     assert.deepEqual(await cliCalls(), []);
     assert.equal(requests(), 0);
+  });
+});
+
+test("lifecycle: uninstall removes the install dir only when it is left empty", { skip: zipSkip, timeout: 120000 }, async () => {
+  await withWorkspace(async ({ installDir, release, run }) => {
+    const rel = release({ version: "0.1.0" });
+    const install = await run(["-From", rel.dir]);
+    assert.equal(install.code, 0, install.stdout + install.stderr);
+    const notes = join(installDir, "notes.txt");
+    await writeFile(notes, "mine\n");
+
+    const kept = await run(["-Uninstall"]);
+    assert.equal(kept.code, 0, kept.stdout + kept.stderr);
+    assert.equal(existsSync(join(installDir, "snipset.exe")), false);
+    assert.ok(existsSync(notes), kept.stdout);
+
+    await rm(notes);
+    const emptied = await run(["-Uninstall"]);
+    assert.equal(emptied.code, 0, emptied.stdout + emptied.stderr);
+    assert.equal(lines(emptied.stdout).at(-1), "uninstall: removed 0, kept 0");
+    assert.equal(existsSync(installDir), false, emptied.stdout);
   });
 });
 
