@@ -147,6 +147,58 @@ do_update() {
   fi
   do_install
 }
+# Prints, one per line, every directory an install with the current flags may create
+# (the parent of each file it writes, and their ancestors up to, not including, HOME
+# or /), using the same expressions as the mkdir_recorded call sites.
+dirs_candidates() {
+  local home="${HOME%"${HOME##*[!/]}"}" target path up id file
+  local -a ids targets=("$install_dir" "$share_dir" "${bashrc%/*}")
+  file="$(pathenv_fish_conf)"
+  targets+=("${file%/*}" "${HOME}/.config/fish/conf.d")
+  file="$(pathenv_zshenv)"
+  targets+=("${file%/*}")
+  read -r -a ids <<< "$mcp_list"
+  for id in "${ids[@]}"; do
+    case "$id" in
+      opencode|cursor) targets+=("$(dirname "$(mcp_file "$id")")") ;;
+    esac
+  done
+  for target in "${targets[@]}"; do
+    path="$target"
+    while [[ -n "$path" && "$path" != . && "${path%"${path##*[!/]}"}" != "$home" && -n "${path%"${path##*[!/]}"}" ]]; do
+      printf '%s\n' "$path"
+      up="$(dirname -- "$path")"
+      [[ "$up" != "$path" ]] || break
+      path="$up"
+    done
+  done
+}
+# Runs last: removes, deepest first, each recorded directory that the current flags
+# could have created, that is a real directory, and that rmdir finds empty.
+dirs_remove() {
+  local rec="${install_dir}/.snipset-dirs" text cands path
+  if [[ -L "$rec" ]]; then
+    report KEEP 'dirs record' "${rec} symlink left in place"
+    return 0
+  fi
+  [[ -f "$rec" ]] || return 0
+  text="$(cat -- "$rec" 2>/dev/null && printf x)" || text=""
+  if [[ "$text" != *x ]]; then
+    report FAIL 'dirs record' "${rec} could not be read"
+    return 0
+  fi
+  rm -f -- "$rec"
+  cands=$'\n'"$(dirs_candidates)"$'\n'
+  while IFS= read -r path; do
+    [[ -n "$path" && "$cands" == *$'\n'"$path"$'\n'* ]] || continue
+    # A .. component could name HOME or / under another spelling.
+    [[ "/${path}/" != */../* ]] || continue
+    [[ -d "$path" && ! -L "$path" ]] || continue
+    if rmdir -- "$path" 2>/dev/null; then
+      report REMOVED dir "$path"
+    fi
+  done < <(printf '%s' "${text%x}" | awk '{ print length($0) "\t" $0 }' | sort -k1,1nr | cut -f2-)
+}
 do_uninstall() {
   # The remove functions delete for real, so there is nothing safe to preview.
   if ((dry_run)); then
@@ -158,6 +210,7 @@ do_uninstall() {
   shell_remove
   pathenv_remove
   binary_remove
+  dirs_remove
   printf 'uninstall: removed %d, kept %d\n' "$n_removed" "$n_kept"
   ((n_fail == 0)) || exit 1
 }
