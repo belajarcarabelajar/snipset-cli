@@ -23,3 +23,12 @@ Question (2026-10-12, one call, two multi-select groups): `snipset-cli` S2, S3, 
 | Item | Commit | Evidence |
 |---|---|---|
 | S2 | see the S2 commit on PR #8 | RED 6 fail on HEAD; GREEN 16 Linux suites 245 pass; six mutations each fail their own test |
+
+## 3. Re-pass (debt from executing S2)
+
+| # | Candidate | Class | Decision |
+|---|---|---|---|
+| R1 | An install without `ZDOTDIR`, uninstalled with `ZDOTDIR` set, leaves an emptied `~/.zshenv` (it is outside the recomputed startup set) | LATER | `defer: safe direction, upgrade-trigger: a user report` |
+| R2 | A newline in `ZDOTDIR` leaves an empty `.snipset-files` behind | LATER | `defer: harmless, upgrade-trigger: none expected` |
+
+No new `NOW` item, so no second question.
