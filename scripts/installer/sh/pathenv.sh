@@ -52,15 +52,18 @@ pathenv_line_add() {
   grep -Fqx -- "$line" "$1" || printf '\n%s\n' "$line" >> "$1"
 }
 # Drops each exact line and the blank line written just before it, rewriting in place to keep symlinks.
+# pathenv_line_add always writes a newline before the line, so a non-blank line right before a
+# final managed line means FILE had no final newline, and the strip leaves it without one.
 # Returns 1 when FILE holds no such line and 2 when FILE could not be rewritten.
 pathenv_strip() {
   if ! { [[ -f "$1" ]] && grep -Fqx -- "$2" "$1"; }; then
     return 1
   fi
+  # shellcheck disable=SC2016 # $0 and ENVIRON are awk syntax, expanded by awk, not the shell
   rewrite_from "$1" env PATHENV_TARGET="$2" awk '
-    $0 == ENVIRON["PATHENV_TARGET"] { if (held && prev != "") print prev; held = 0; next }
-    { if (held) print prev; prev = $0; held = 1 }
-    END { if (held) print prev }
+    $0 == ENVIRON["PATHENV_TARGET"] { if (held && prev != "") { tail = prev; tailed = 1 } held = 0; next }
+    { if (tailed) print tail; tailed = 0; if (held) print prev; prev = $0; held = 1 }
+    END { if (tailed) printf "%s", tail; else if (held) print prev }
   ' "$1"
 }
 pathenv_marked() {

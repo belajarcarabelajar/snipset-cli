@@ -59,12 +59,12 @@ Releases without the shell bundle ship the binary only. The installer then skips
 | `--install-dir DIR` | Binary destination. Default: `~/.local/bin`. |
 | `--add-path` | Add the install dir to PATH for bash, zsh, and fish. See [Shells and PATH](#shells-and-path). |
 | `--share-dir DIR` | Shell bundle destination. Default: `~/.local/share/snipset`. |
-| `--db PATH` | Database for init, shims, and MCP. Default: the CLI default. |
+| `--db PATH` | Database for init, shims, and MCP. The bashrc block then exports `SNIPSET_DB`, so shims, TAB expansion, and completion use it. Default: the CLI default. |
 | `--bashrc PATH` | Shell startup file for the integration block. Default: `~/.bashrc`. |
 | `--no-init` | Skip creating the standalone database. |
 | `--no-shell` | Skip shell integration. |
 | `--no-shims` | Skip generating trigger shims. |
-| `--with-mcp` | Same as `--with-mcp=opencode`: write `~/.config/opencode/opencode.json` when it is absent. |
+| `--with-mcp` | Same as `--with-mcp=opencode`: write `$XDG_CONFIG_HOME/opencode/opencode.json` (default `~/.config/opencode/opencode.json`) when it is absent. |
 | `--with-mcp=LIST` | Register MCP for a comma list of `claude`, `codex`, `gemini`, `opencode`, `cursor`, `vscode`, or `all`. See [MCP registration](#mcp-registration). |
 | `--from DIR` | Install from `SHA256SUMS` and the archive in DIR. No download. See [Offline install](#offline-install). |
 | `--dry-run` | Print every step and write nothing. |
@@ -86,12 +86,13 @@ Releases without the shell bundle ship the binary only. The installer then skips
 | --- | --- |
 | 0 | Done. For `--check`: everything is current. |
 | 1 | A required step failed (download, checksum, archive, binary test run, an `[FAIL]` line), the system was refused, or `--check` found drift. A failed `snipset init` or shim generation only prints a note. |
-| 2 | Usage error: an unknown flag, a missing value, two modes at once, or `--dry-run --uninstall`. |
+| 2 | Usage error: an unknown flag, a missing value, an empty path value or one that starts with `-`, an invalid `--version` (with or without `--dry-run`), two modes at once, or `--dry-run --uninstall`. |
 
 Rules:
 
 - `--check` and `--uninstall` look only where you point them. Pass the same `--install-dir`, `--share-dir`, `--bashrc`, `--db`, and `--with-mcp` flags you used for the install. `--check` also needs `--add-path` to check PATH.
 - `--dry-run --uninstall` is refused, because the remove steps cannot be previewed. Run `--check` to see what is installed.
+- A relative `--install-dir`, `--share-dir`, `--db`, `--bashrc`, or `--from` is made absolute against the current directory before anything is written, so the startup files and MCP configs never depend on the directory a later shell starts in.
 - The database is never removed.
 - Uninstall removes the directories the install created, deepest first, when they are empty. The install records them in `<install-dir>/.snipset-dirs`. A directory that existed before the install, or that still holds a file, stays, except the default share dir an older install left (next rule). Other directories made by an installer older than this record are not in it and can stay behind empty.
 - The installer tracks the shell files it writes in `<share-dir>/.snipset-bundle`. A `snipset.sh`, `completion.bash`, or `tab.sh` there that it did not write, or that you edited, is kept: install and uninstall print `[KEEP]`, and the bashrc block is not added while one is kept, because it would source that file at every login. Delete the file to let the installer manage it again.
@@ -143,7 +144,7 @@ Older installers wrote `export PATH="<install-dir>:$PATH"` into `~/.profile`. Th
 | `claude` | `claude mcp add --scope user snipset -- <bin> mcp` | `claude mcp remove --scope user snipset` |
 | `codex` | `codex mcp add snipset -- <bin> mcp` | `codex mcp remove snipset` |
 | `gemini` | `gemini mcp add --scope user snipset <bin> mcp` | `gemini mcp remove --scope user snipset` |
-| `opencode` | writes `~/.config/opencode/opencode.json` when it is absent | deletes the file only when it still matches what the installer wrote |
+| `opencode` | writes `$XDG_CONFIG_HOME/opencode/opencode.json` (default `~/.config/opencode/opencode.json`) when it is absent; a `~/.config/opencode/opencode.json` from an older install is still used while no `$XDG_CONFIG_HOME` file exists | deletes the file only when it still matches what the installer wrote |
 | `cursor` | writes `~/.cursor/mcp.json` when it is absent; otherwise prints the entry to add by hand | deletes the file only when it still matches what the installer wrote |
 | `vscode` | `code --add-mcp '{"name":"snipset","command":"<bin>","args":["mcp"]}'` | not removed; delete `snipset` from the VS Code `mcp.json` by hand |
 
@@ -283,14 +284,19 @@ bash scripts/snipset-live.sh --refresh snippet get <uuid>
 Only these commands are reads: `snippet list/get/search/expand`, `group list`,
 every `stats` command, `reference list`, `clipboard list/get/search/export`,
 `clipboard tag list`, `audio history list/get`, `audio dictionary list`,
-`audio tts list`, and `audio stats`. Reads use the snapshot in
+`audio tts list`, `audio stats`, `journal list/get/export`,
+`task list/get/subtasks/stats`, `task project list`, `task folder list`,
+`note list/get/search/count/stats`, `settings list/get/export`,
+`support categories`, and `export`. `--version`, `-V`, `help`, and
+`<command> --help` also skip the write check, because they never open the
+database. `pomodoro` and `doctor` go through the write path. Reads use the snapshot in
 `$SNIPSET_LIVE_SNAPSHOT_DIR` (default `${TMPDIR:-/tmp}/snipset-live-<uid>`,
 where `<uid>` is your numeric user id). `snippet expand` is a read and never
 touches the live file. Every other command is a write, including
 `snippet add/update/delete` and the clipboard and audio commands that change
 data. Writes target the live database, but only after `snipset doctor` proves
-it is reachable. If the wrapper refuses a write, close Snipset Desktop and
-retry.
+it is reachable. If the wrapper refuses a write (exit 3), it prints doctor's
+reason after its own two lines; close Snipset Desktop and retry.
 
 Before each command, the wrapper refreshes the snapshot when `--refresh` is
 passed, when the snapshot is missing, or when the live database or its `-wal`

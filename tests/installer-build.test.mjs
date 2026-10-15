@@ -41,7 +41,7 @@ const USAGE_LINES = [
   "  --no-init          Skip creating the standalone database.",
   "  --no-shell         Skip shell integration.",
   "  --no-shims         Skip generating trigger shims.",
-  "  --with-mcp         Write ~/.config/opencode/opencode.json if absent.",
+  "  --with-mcp         Write $XDG_CONFIG_HOME (default ~/.config)/opencode/opencode.json if absent.",
   "  --help, -h         Show this help and exit.",
 ];
 const ps1PartsDir = join(root, "scripts", "installer", "ps1");

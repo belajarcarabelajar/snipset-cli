@@ -8,11 +8,19 @@ function Get-SnipsetFromVersion {
   $found[0]
 }
 function Resolve-SnipsetVersion {
-  if ($Version -and $Version -notmatch '^v?\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: invalid version' }
-  if ($Version -and $Version -notlike 'v*') { $Version = "v$Version" }
+  # Case-sensitive: release tags are lowercase vX.Y.Z, so V0.2.0 names a tag that does not exist.
+  if ($Version -and $Version -cnotmatch '^v?\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: invalid version' }
+  if ($Version -and $Version -cnotlike 'v*') { $Version = "v$Version" }
   if (-not $Version -and $From) { $Version = Get-SnipsetFromVersion -From $From }
-  if (-not $Version) { $Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest").tag_name }
-  if ($Version -notmatch '^v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: release version was not found' }
+  if (-not $Version) {
+    try { $Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest").tag_name }
+    catch {
+      $status = $_.Exception.Response.StatusCode
+      if ($status) { throw "install.ps1: release version was not found (HTTP $([int]$status))" }
+      throw 'install.ps1: release version was not found'
+    }
+  }
+  if ($Version -cnotmatch '^v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: release version was not found' }
   $Version
 }
 function Get-SnipsetRelease {

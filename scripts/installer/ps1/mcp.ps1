@@ -15,12 +15,18 @@ function Find-SnipsetMcpCli {
 function Get-SnipsetMcpFile {
   param([string]$Id)
   $onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+  $config = if (-not $onWindows -and $env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { [IO.Path]::Combine($HOME, '.config') }
   switch ($Id) {
-    'opencode' { [IO.Path]::Combine($HOME, '.config', 'opencode', 'opencode.json') }
+    'opencode' {
+      $path = [IO.Path]::Combine($config, 'opencode', 'opencode.json')
+      # Installs made before XDG_CONFIG_HOME was honoured wrote under ~/.config; keep finding that file.
+      $legacy = [IO.Path]::Combine($HOME, '.config', 'opencode', 'opencode.json')
+      if (-not [IO.File]::Exists($path) -and [IO.File]::Exists($legacy)) { $legacy } else { $path }
+    }
     'cursor' { [IO.Path]::Combine($HOME, '.cursor', 'mcp.json') }
     'vscode' {
       if ($onWindows) { [IO.Path]::Combine($env:APPDATA, 'Code', 'User', 'mcp.json') }
-      else { [IO.Path]::Combine($HOME, '.config', 'Code', 'User', 'mcp.json') }
+      else { [IO.Path]::Combine($config, 'Code', 'User', 'mcp.json') }
     }
   }
 }
@@ -156,10 +162,19 @@ function Get-SnipsetMcpState {
   $file = Get-SnipsetMcpFile -Id $Id
   if (-not [IO.File]::Exists($file)) { return 'absent' }
   $text = [IO.File]::ReadAllText($file)
-  # The files hold the path JSON-encoded, so Windows backslashes appear doubled.
-  if ($text.Contains((ConvertTo-Json -InputObject $Bin -Compress))) { return 'mine' }
-  if ($text.Contains('"snipset"')) { return 'foreign' }
-  'other'
+  if (-not $text.Contains('"snipset"')) { return 'other' }
+  # Parsed, not searched: another server running the same binary must not make "snipset" look ours.
+  # A file that does not parse (Windows PowerShell 5.1 rejects comments) stays foreign, so it is never rewritten.
+  $doc = $null
+  try { $doc = ConvertFrom-Json -InputObject $text } catch { }
+  $servers = if ($doc) { switch ($Id) { 'opencode' { $doc.mcp } 'vscode' { $doc.servers } default { $doc.mcpServers } } }
+  $entry = if ($servers) { @($servers.PSObject.Properties | Where-Object { $_.Name -ceq 'snipset' })[0] }
+  if ($entry) {
+    $command = $entry.Value.command
+    if ($Id -eq 'opencode') { $command = if ($command -is [Array]) { $command[0] } }
+    if ($command -is [string] -and $command -ceq $Bin) { return 'mine' }
+  }
+  'foreign'
 }
 
 function Install-SnipsetMcp {
