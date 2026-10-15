@@ -295,8 +295,8 @@ where `<uid>` is your numeric user id). `snippet expand` is a read and never
 touches the live file. Every other command is a write, including
 `snippet add/update/delete` and the clipboard and audio commands that change
 data. Writes target the live database, but only after `snipset doctor` proves
-it is reachable. If the wrapper refuses a write, close Snipset Desktop and
-retry.
+it is reachable. If the wrapper refuses a write (exit 3), it prints doctor's
+reason after its own two lines; close Snipset Desktop and retry.
 
 Before each command, the wrapper refreshes the snapshot when `--refresh` is
 passed, when the snapshot is missing, or when the live database or its `-wal`

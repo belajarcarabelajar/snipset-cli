@@ -121,7 +121,9 @@ test("an unknown --with-mcp id exits 2 while a known id is accepted", async () =
 test("--from without a value exits 2 while --from DIR is accepted", async () => {
   const sb = sandboxWithRelease();
   assertUsageError(await runInstaller(sb, ["--from"]), ["--from"]);
-  const args = ["--dry-run", "--version", "0.1.0", "--from", sb.tmp];
+  const release = fakeLinuxRelease();
+  cleanups.push(() => rm(release.dir, { recursive: true, force: true }));
+  const args = ["--dry-run", "--version", "0.1.0", "--from", release.dir];
   assertAccepted(await runInstaller(sb, args), args);
 });
 

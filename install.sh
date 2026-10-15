@@ -610,6 +610,7 @@ pathenv_strip() {
   if ! { [[ -f "$1" ]] && grep -Fqx -- "$2" "$1"; }; then
     return 1
   fi
+  # shellcheck disable=SC2016 # $0 and ENVIRON are awk syntax, expanded by awk, not the shell
   rewrite_from "$1" env PATHENV_TARGET="$2" awk '
     $0 == ENVIRON["PATHENV_TARGET"] { if (held && prev != "") { tail = prev; tailed = 1 } held = 0; next }
     { if (tailed) print tail; tailed = 0; if (held) print prev; prev = $0; held = 1 }
@@ -1534,11 +1535,16 @@ install_dry_path() {
   fi
 }
 install_dry_run() {
-  local id pinned="$version"
+  local id name pinned="$version"
   local -a ids
   platform_require
   fetch_tools_require
   fetch_resolve_version
+  if [[ -n "$from_dir" ]]; then
+    for name in SHA256SUMS "$archive"; do
+      [[ -f "${from_dir}/${name}" ]] || die "${from_dir}/${name} is missing"
+    done
+  fi
   printf '[DRY] platform: require %s\n' "$target"
   if [[ -n "$from_dir" ]]; then
     printf '[DRY] tools: require tar; sha256sum, shasum, or openssl\n'
@@ -1565,7 +1571,15 @@ install_dry_run() {
   install_dry_path
   if ((do_shell)); then
     printf '[DRY] shell bundle: copy into %s\n' "$share_dir"
-    printf '[DRY] shell block: add to %s\n' "$bashrc"
+    shell_block_scan
+    if ((shell_block_at < 0)); then
+      printf '[DRY] shell block: add to %s\n' "$bashrc"
+    elif [[ -n "$shell_block_stale" ]]; then
+      printf '[DRY] shell block: upgrade %s\n' "$bashrc"
+    else
+      # An edited block is left as it is by shell_block_add, so it reads as keep too.
+      printf '[DRY] shell block: keep %s\n' "$bashrc"
+    fi
   else
     printf '[DRY] shell bundle: skip %s (--no-shell)\n' "$share_dir"
     printf '[DRY] shell block: skip %s (--no-shell)\n' "$bashrc"
