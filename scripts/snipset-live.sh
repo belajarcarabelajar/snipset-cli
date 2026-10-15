@@ -49,12 +49,17 @@ fi
 cmd=""
 sub=""
 action=""
+info=0
+after_dashdash=0
 skip_next=0
 for a in "$@"; do
   if ((skip_next)); then skip_next=0; continue; fi
   case "$a" in
     --db) skip_next=1 ;;
     --db=*) ;;
+    # After `--`, clap reads `--help` as a plain value, so `settings set k -- --help` is a write.
+    --) after_dashdash=1 ;;
+    --help|-h|--version|-V) ((after_dashdash)) || info=1 ;;
     -*) ;;
     *)
       if [[ -z "$cmd" ]]; then cmd="$a"; elif [[ -z "$sub" ]]; then sub="$a"; elif [[ -z "$action" ]]; then action="$a"; fi
@@ -64,6 +69,8 @@ done
 # Allowlist only: anything unrecognized falls through to the doctor-gated
 # write path, because misrouting a write to the snapshot silently loses it.
 is_read=0
+# Help and version output never opens the database.
+if ((info)) || [[ "$cmd" == "help" ]]; then is_read=1; fi
 case "$cmd $sub" in
   "snippet list"|"snippet get"|"snippet search"|"snippet expand") is_read=1 ;;
   "group list") is_read=1 ;;
@@ -74,6 +81,14 @@ case "$cmd $sub" in
   "audio history") if [[ "$action" == "list" || "$action" == "get" ]]; then is_read=1; fi ;;
   "audio dictionary"|"audio tts") if [[ "$action" == "list" ]]; then is_read=1; fi ;;
   "audio stats") is_read=1 ;;
+  "journal list"|"journal get"|"journal export") is_read=1 ;;
+  "task list"|"task get"|"task subtasks"|"task stats") is_read=1 ;;
+  "task project"|"task folder") if [[ "$action" == "list" ]]; then is_read=1; fi ;;
+  "note list"|"note get"|"note search"|"note count"|"note stats") is_read=1 ;;
+  "settings list"|"settings get"|"settings export") is_read=1 ;;
+  "support categories") is_read=1 ;;
+  # export is a leaf, so a second positional is an option value such as `--format csv`.
+  "export "*) is_read=1 ;;
 esac
 # Never forward a user-supplied --db: the wrapper owns the --db target
 # (snapshot for reads, live for gated writes) and a duplicate would let

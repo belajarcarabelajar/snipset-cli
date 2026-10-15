@@ -201,11 +201,19 @@ function Get-SnipsetFromVersion {
   $found[0]
 }
 function Resolve-SnipsetVersion {
-  if ($Version -and $Version -notmatch '^v?\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: invalid version' }
-  if ($Version -and $Version -notlike 'v*') { $Version = "v$Version" }
+  # Case-sensitive: release tags are lowercase vX.Y.Z, so V0.2.0 names a tag that does not exist.
+  if ($Version -and $Version -cnotmatch '^v?\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: invalid version' }
+  if ($Version -and $Version -cnotlike 'v*') { $Version = "v$Version" }
   if (-not $Version -and $From) { $Version = Get-SnipsetFromVersion -From $From }
-  if (-not $Version) { $Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest").tag_name }
-  if ($Version -notmatch '^v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: release version was not found' }
+  if (-not $Version) {
+    try { $Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest").tag_name }
+    catch {
+      $status = $_.Exception.Response.StatusCode
+      if ($status) { throw "install.ps1: release version was not found (HTTP $([int]$status))" }
+      throw 'install.ps1: release version was not found'
+    }
+  }
+  if ($Version -cnotmatch '^v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { throw 'install.ps1: release version was not found' }
   $Version
 }
 function Get-SnipsetRelease {
@@ -482,12 +490,18 @@ function Find-SnipsetMcpCli {
 function Get-SnipsetMcpFile {
   param([string]$Id)
   $onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+  $config = if (-not $onWindows -and $env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { [IO.Path]::Combine($HOME, '.config') }
   switch ($Id) {
-    'opencode' { [IO.Path]::Combine($HOME, '.config', 'opencode', 'opencode.json') }
+    'opencode' {
+      $path = [IO.Path]::Combine($config, 'opencode', 'opencode.json')
+      # Installs made before XDG_CONFIG_HOME was honoured wrote under ~/.config; keep finding that file.
+      $legacy = [IO.Path]::Combine($HOME, '.config', 'opencode', 'opencode.json')
+      if (-not [IO.File]::Exists($path) -and [IO.File]::Exists($legacy)) { $legacy } else { $path }
+    }
     'cursor' { [IO.Path]::Combine($HOME, '.cursor', 'mcp.json') }
     'vscode' {
       if ($onWindows) { [IO.Path]::Combine($env:APPDATA, 'Code', 'User', 'mcp.json') }
-      else { [IO.Path]::Combine($HOME, '.config', 'Code', 'User', 'mcp.json') }
+      else { [IO.Path]::Combine($config, 'Code', 'User', 'mcp.json') }
     }
   }
 }
@@ -623,10 +637,19 @@ function Get-SnipsetMcpState {
   $file = Get-SnipsetMcpFile -Id $Id
   if (-not [IO.File]::Exists($file)) { return 'absent' }
   $text = [IO.File]::ReadAllText($file)
-  # The files hold the path JSON-encoded, so Windows backslashes appear doubled.
-  if ($text.Contains((ConvertTo-Json -InputObject $Bin -Compress))) { return 'mine' }
-  if ($text.Contains('"snipset"')) { return 'foreign' }
-  'other'
+  if (-not $text.Contains('"snipset"')) { return 'other' }
+  # Parsed, not searched: another server running the same binary must not make "snipset" look ours.
+  # A file that does not parse (Windows PowerShell 5.1 rejects comments) stays foreign, so it is never rewritten.
+  $doc = $null
+  try { $doc = ConvertFrom-Json -InputObject $text } catch { }
+  $servers = if ($doc) { switch ($Id) { 'opencode' { $doc.mcp } 'vscode' { $doc.servers } default { $doc.mcpServers } } }
+  $entry = if ($servers) { @($servers.PSObject.Properties | Where-Object { $_.Name -ceq 'snipset' })[0] }
+  if ($entry) {
+    $command = $entry.Value.command
+    if ($Id -eq 'opencode') { $command = if ($command -is [Array]) { $command[0] } }
+    if ($command -is [string] -and $command -ceq $Bin) { return 'mine' }
+  }
+  'foreign'
 }
 
 function Install-SnipsetMcp {

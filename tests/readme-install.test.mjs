@@ -168,7 +168,7 @@ describe("README install coverage", () => {
     expect(firstAt).toBeGreaterThanOrEqual(0);
     expect(readme.indexOf(last, firstAt)).toBeGreaterThan(firstAt);
     const body = section("Querying the live database (companion workflow)");
-    expect(createHash("sha256").update(body).digest("hex")).toBe("271d4e87b6c236d2e81b32ec9edef0996d3b4dade0766c25ad636c1e71c572c5");
+    expect(createHash("sha256").update(body).digest("hex")).toBe("2f4aee2c6e2bffa2f987814c24cf0126a08616aa9de353b8d19f3344de140efa");
   });
 });
 

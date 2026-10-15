@@ -7,7 +7,15 @@ mcp_cli() {
 }
 mcp_file() {
   case "$1" in
-    opencode) printf '%s' "${HOME}/.config/opencode/opencode.json" ;;
+    opencode)
+      local file="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/opencode.json"
+      local legacy="${HOME}/.config/opencode/opencode.json"
+      # v0.2.0 wrote the legacy path even with XDG_CONFIG_HOME set; that file stays the
+      # one to check and uninstall until an XDG file exists.
+      if [[ "$file" != "$legacy" && ! -e "$file" && -f "$legacy" ]]; then
+        file="$legacy"
+      fi
+      printf '%s' "$file" ;;
     cursor) printf '%s' "${HOME}/.cursor/mcp.json" ;;
     vscode) printf '%s' "${XDG_CONFIG_HOME:-${HOME}/.config}/Code/User/mcp.json" ;;
   esac
@@ -117,7 +125,7 @@ mcp_scoped_detail() {
 # (the binary is registered in a scope the installer does not own), and for
 # claude a second word naming the scope.
 mcp_probe() {
-  local id="$1" cli out line cmd="" text
+  local id="$1" cli out line cmd="" text re
   cli="$(mcp_cli "$id")"
   case "$id" in
     claude|codex|gemini)
@@ -147,12 +155,20 @@ mcp_probe() {
         return 0
       fi
       text="$(cat -- "$(mcp_file "$id")")"
-      if [[ "$text" == *"\"${snipset_bin}\""* ]]; then
-        printf 'mine'
-      elif [[ "$text" == *'"snipset"'* ]]; then
-        printf 'foreign'
-      else
+      if [[ "$text" != *'"snipset"'* ]]; then
         printf 'other'
+        return 0
+      fi
+      # Only the "snipset" object's own command counts; one nested object (env) is stepped over,
+      # deeper nesting stays foreign. opencode holds the command as an array led by the binary.
+      re='"snipset"[[:space:]]*:[[:space:]]*\{([^{}]|\{[^{}]*\})*"command"[[:space:]]*:[[:space:]]*'
+      [[ "$id" != opencode ]] || re+='\[[[:space:]]*'
+      re+='"([^"]*)"'
+      text="${text//$'\n'/ }"
+      if [[ "$text" =~ $re ]] && [[ "${BASH_REMATCH[2]}" == "$snipset_bin" ]]; then
+        printf 'mine'
+      else
+        printf 'foreign'
       fi ;;
   esac
 }

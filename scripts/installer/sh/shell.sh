@@ -84,11 +84,16 @@ shell_bundle_place() {
   fi
   rm -rf "$stage"
 }
-# The marker and the four lines below it, exactly as shell_block_add writes them.
+# The marker and the lines below it, exactly as shell_block_add writes them. With the
+# argument "legacy", the shape installers wrote before the SNIPSET_DB line existed.
 shell_block_lines() {
   printf '%s\n' "$shell_marker"
   # shellcheck disable=SC2016 # $PATH is written literally into .bashrc
   printf 'if ! command -v snipset >/dev/null 2>&1; then export PATH="%s:$PATH"; fi\n' "$install_dir"
+  # The shims, TAB, and completion read SNIPSET_DB; args.sh already refuses " ` \ $ in paths.
+  if [[ -n "$db" && "${1:-}" != legacy ]]; then
+    printf 'export SNIPSET_DB="%s"\n' "$db"
+  fi
   printf '[ -f "%s/snipset.sh" ] && . "%s/snipset.sh"\n' "$share_dir" "$share_dir"
   printf '[ -f "%s/completion.bash" ] && . "%s/completion.bash"\n' "$share_dir" "$share_dir"
   printf '[ -f "%s/tab.sh" ] && . "%s/tab.sh"\n' "$share_dir" "$share_dir"
@@ -100,25 +105,60 @@ shell_block_add() {
       report SKIP 'shell block' "${bashrc} left unchanged; not written by the installer in ${share_dir}: ${shell_kept[*]}"
       return 0
     fi
+    # A bare file name has no parent to create: ${bashrc%/*} would name the file itself.
+    if [[ "$bashrc" == */* && -n "${bashrc%/*}" ]]; then
+      mkdir_recorded "${bashrc%/*}"
+    fi
     touch_recorded "$bashrc"
-    if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
+    shell_block_scan
+    if ((shell_block_at < 0)); then
       {
         printf '\n'
         shell_block_lines
       } >> "$bashrc"
+    elif [[ -n "$shell_block_stale" ]]; then
+      # Write in place: a symlinked bashrc must stay a symlink into its dotfiles repo.
+      rewrite_from "$bashrc" shell_block_upgraded || rewrite_fail 'shell block' "$bashrc"
     fi
   fi
 }
+# Prints the scanned bashrc with its stale block replaced by the current one.
+shell_block_upgraded() {
+  local i out=""
+  for i in "${!shell_rc_lines[@]}"; do
+    if ((i == shell_block_at)); then
+      out+="$(shell_block_lines)"$'\n'
+    fi
+    ((i >= shell_block_at && i < shell_block_at + shell_block_len)) && continue
+    out+="${shell_rc_lines[i]}"$'\n'
+  done
+  ((shell_rc_newline)) || out="${out%$'\n'}"
+  printf '%s' "$out"
+}
+# Returns 0 when the lines from shell_block_at + OFFSET on start with the other arguments.
+shell_block_match() {
+  local i="$1" want
+  shift
+  for want in "$@"; do
+    [[ "${shell_rc_lines[shell_block_at + i]-}" == "$want" ]] || return 1
+    i=$((i + 1))
+  done
+}
 # Reads $bashrc into shell_rc_lines and sets shell_rc_newline (1 when the file
 # ends in a newline), shell_block_at (index of the first marker line, -1 when
-# absent), and shell_block_exact (1 when the marker and its four lines match).
+# absent), shell_block_exact (1 when the block matches shell_block_lines),
+# shell_block_stale ("without" for the legacy shape, "other" for the current shape
+# with any other SNIPSET_DB line or one --db no longer asks for, "" otherwise), and
+# shell_block_len (the line count of the shape that matched).
 shell_block_scan() {
-  local line i
+  local line i re='^export SNIPSET_DB="[^"]*"$'
   local -a want
   shell_rc_lines=()
   shell_rc_newline=1
   shell_block_at=-1
   shell_block_exact=0
+  shell_block_stale=""
+  shell_block_len=0
   [[ -f "$bashrc" ]] || return 0
   line=""
   while IFS= read -r line; do
@@ -136,13 +176,20 @@ shell_block_scan() {
   done
   ((shell_block_at >= 0)) || return 0
   mapfile -t want < <(shell_block_lines)
-  shell_block_exact=1
-  for i in "${!want[@]}"; do
-    if [[ "${shell_rc_lines[shell_block_at + i]-}" != "${want[i]}" ]]; then
-      shell_block_exact=0
-      return 0
-    fi
-  done
+  if shell_block_match 0 "${want[@]}"; then
+    shell_block_exact=1
+    shell_block_len=${#want[@]}
+    return 0
+  fi
+  mapfile -t want < <(shell_block_lines legacy)
+  if shell_block_match 0 "${want[@]}"; then
+    shell_block_stale=without
+    shell_block_len=${#want[@]}
+  elif shell_block_match 0 "${want[@]:0:2}" && [[ "${shell_rc_lines[shell_block_at + 2]-}" =~ $re ]] &&
+    shell_block_match 3 "${want[@]:2}"; then
+    shell_block_stale=other
+    shell_block_len=$((${#want[@]} + 1))
+  fi
 }
 shell_check() {
   local name path
@@ -168,6 +215,12 @@ shell_check() {
     report MISSING 'shell block' "$bashrc"
   elif ((shell_block_exact)); then
     report OK 'shell block' "$bashrc"
+  elif [[ "$shell_block_stale" == without ]]; then
+    report DRIFT 'shell block' "${bashrc} holds a block without the SNIPSET_DB line for --db; re-run the install"
+  elif [[ -n "$shell_block_stale" && -n "$db" ]]; then
+    report DRIFT 'shell block' "${bashrc} holds a block that exports another SNIPSET_DB; re-run the install"
+  elif [[ -n "$shell_block_stale" ]]; then
+    report DRIFT 'shell block' "${bashrc} holds a block that exports SNIPSET_DB, but --db was not given; re-run the install"
   else
     report DRIFT 'shell block' "${bashrc} holds the marker with other lines"
   fi
@@ -189,7 +242,7 @@ shell_manifest_remove() {
   fi
 }
 shell_remove() {
-  local name path i start end out=""
+  local name path i start end last trim=0 out=""
   # Without the shell bundle these names may hold the user's own files.
   if ! ((do_shell)); then
     report SKIP shell '--no-shell, nothing to remove'
@@ -219,19 +272,27 @@ shell_remove() {
   shell_block_scan
   if ((shell_block_at < 0)); then
     report SKIP 'shell block' "none in ${bashrc}"
-  elif ! ((shell_block_exact)); then
+  elif ! ((shell_block_exact)) && [[ -z "$shell_block_stale" ]]; then
     report KEEP 'shell block' 'edited; remove it by hand'
   else
     start=$shell_block_at
-    end=$((shell_block_at + 4))
+    end=$((shell_block_at + shell_block_len - 1))
+    last=$((${#shell_rc_lines[@]} - 1))
     if ((start > 0)) && [[ -z "${shell_rc_lines[start - 1]}" ]]; then
       start=$((start - 1))
+    elif ((start > 0 && end == last)); then
+      # The install writes "\n" before the marker, so a non-blank line just before it
+      # means the file had no final newline until the install added one.
+      trim=1
     fi
     for i in "${!shell_rc_lines[@]}"; do
       ((i >= start && i <= end)) && continue
       out+="${shell_rc_lines[i]}"$'\n'
     done
-    if [[ -n "$out" ]] && ! ((shell_rc_newline)) && ((end < ${#shell_rc_lines[@]} - 1)); then
+    if ((end < last)) && ! ((shell_rc_newline)); then
+      trim=1
+    fi
+    if [[ -n "$out" ]] && ((trim)); then
       out="${out%$'\n'}"
     fi
     # Write in place: a symlinked bashrc must stay a symlink into its dotfiles repo.

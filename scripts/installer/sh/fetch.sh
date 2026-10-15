@@ -54,7 +54,7 @@ fetch_resolve_version() {
   if [[ -z "$version" && -n "$from_dir" ]]; then
     fetch_from_version
   elif [[ -z "$version" ]]; then
-    version="$(fetch_text "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    version="$(fetch_text "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)" || version=''
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die 'release version was not found'
   else
     [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die 'invalid version' 2
@@ -72,6 +72,7 @@ fetch_release() {
     done
     return 0
   fi
-  fetch_get "${release_url}/SHA256SUMS" "${1}/SHA256SUMS"
-  fetch_get "${release_url}/${archive}" "${1}/${archive}"
+  for name in SHA256SUMS "$archive"; do
+    fetch_get "${release_url}/${name}" "${1}/${name}" || die "download failed: ${release_url}/${name}"
+  done
 }
