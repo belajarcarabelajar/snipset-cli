@@ -23,6 +23,8 @@ A bug hunt against the v0.2.0 release assets found 15 defects in this repository
 - **MCP probes (R11, R12, both installers):** cursor, opencode, and vscode files count as registered only when their own `snipset` entry runs the installed binary (one nested object such as `env` is stepped over). The opencode file follows `XDG_CONFIG_HOME`, and a v0.2.0 file under `~/.config` is still found and removed.
 - **Live wrapper (R7):** `scripts/snipset-live.sh` serves the read commands added in 0.2.0 (`journal`, `task`, `note`, `settings` reads, `support categories`, `export`) and `--version`/`help` from the snapshot instead of refusing them while the live file is locked. The drift test now walks every top-level command of the release.
 
+- **Debt sweep follow-ups:** `--dry-run --from DIR` now fails like the real run when `SHA256SUMS` or the archive is missing, and the dry run says `keep`, `upgrade`, or `add to` for the shell block; `snipset-live.sh` prints doctor's reason when it refuses a write; the `pentest-core` tests that spawn `snipset` have explicit timeouts (a 5 s default timed out once under machine load); `pathenv.sh` disables SC2016 for its awk program with the reason.
+
 **Non-goals:** R13 (`--check` comparing `--db` in MCP entries) and R14 (`--check` after `--no-init --db`) are kept as documented behaviour. Defects in the `snipset` binary and the shell bundle (writes ignoring `--db` when the control API answers, JSON export/import losing groups, `audio dictionary list` failing on app databases, and others) belong to the private Snipset repository and a new release.
 
 ## 3. Acceptance Criteria
@@ -38,15 +40,16 @@ A bug hunt against the v0.2.0 release assets found 15 defects in this repository
 | AC-7 | `install.ps1` version case and lookup message (R9, R10) | T07 | `bun test tests/install-ps1-fetch-errors.test.mjs` | exit 0, 2 pass; 0 of 2 on `main` |
 | AC-8 | MCP probe and opencode path (R11, R12) | T08, T10 | `bun test tests/install-mcp-probe.test.mjs tests/install-ps1-mcp-probe.test.mjs` | exit 0, 7 and 7 pass |
 | AC-9 | bundles match parts, README states the behaviour | T09 | `bun scripts/installer/build.mjs --check`; `bun test tests/readme-install.test.mjs` | exit 0; 24 pass |
+| AC-10 | debt sweep follow-ups (dry run parity, doctor reason, test timeouts, SC2016) | FU1 to FU4 | `bun test tests/install-dryrun-followups.test.mjs tests/snipset-live-doctor-message.test.mjs tests/pentest-core.test.mjs`; `shellcheck` | exit 0; 6, 2, 9 pass; 2 of 6 and 1 of 2 on the pre-change code |
 
 ## 4. Local Verification Evidence
 
 | Gate | Command | Exit | Result |
 |---|---|---|---|
-| Whole suite | `bun test tests/` | 0 | 702 pass, 6 skip, 0 fail, 708 tests in 49 files, 161 s |
+| Whole suite | `bun test tests/` | 0 | 710 pass, 6 skip, 0 fail, 716 tests in 51 files, 134 s |
 | Real v0.2.0 assets | `SNIPSET_REAL_ASSETS=<gh release download dir> bun test tests/install-real-assets.test.mjs` | 0 | 4 pass |
 | Bundles | `bun scripts/installer/build.mjs --check` | 0 | `install.sh` and `install.ps1` match their parts |
-| Shell lint | `shellcheck -s bash scripts/installer/sh/*.sh scripts/snipset-live.sh` | 0 | except one SC2016 info in `pathenv.sh`, present on `main` too |
+| Shell lint | `shellcheck -s bash scripts/installer/sh/*.sh scripts/snipset-live.sh` | 0 | clean |
 
 - **Before:** on `main` (8cd3341), 43 repro commands against the v0.2.0 assets exit non-zero, for example `--install-dir rbin --share-dir rshare --add-path` writes `. "rshare/env"` into `.profile`, and `install.sh` without `--version` exits 22 with only `curl: (22) The requested URL returned error: 404`.
 - **After:** the repo-side repros exit 0 (the startup files hold absolute paths, a login shell started from `/` finds `snipset`; the lookup prints `install.sh: release version was not found` and exits 1). The new tests fail against bundles built from `main`'s parts and pass on this branch.
@@ -76,9 +79,8 @@ A bug hunt against the v0.2.0 release assets found 15 defects in this repository
 - R13 `scripts/installer/sh/mcp.sh` `mcp_check` compares only the binary path, not `--db`. `defer: owner contract call, a user report of --check missing a --db change`
 - R14 `scripts/installer/sh/db.sh` `db_check` reports MISSING after `--no-init --db`. `defer: owner contract call, a user report of drift after --no-init`
 - A v0.2.0 install made with relative paths keeps its relative bashrc block after reinstall (kept as edited, nothing deleted). `defer: one user with such an install, a report of DRIFT after reinstall`
-- `--dry-run --version X --from /missing` exits 0 while the real run fails. `defer: the --from existence check in tests/install-cli.test.mjs is reworked, the next dry-run change`
-- `scripts/installer/sh/modes.sh` dry run always prints `[DRY] shell block: add to`, even when the block exists. `defer: next dry-run change, a user report`
-- `scripts/installer/sh/pathenv.sh` SC2016 info on the awk program, present on `main`. `defer: next pathenv.sh edit, a shellcheck gate in CI`
+- `tests/install-ps1-cli.test.mjs`, `tests/install-ps1-lifecycle.test.mjs` copy `process.env` without clearing `XDG_CONFIG_HOME`. `defer: next edit of the ps1 test env helpers, a test that writes MCP files without -DryRun`
+- README Windows section does not repeat that the `v0.2.0` one-liner URL 404s until the Draft is published. `defer: the Draft is published or the next README edit`
 - 22 defects in the `snipset` binary and shell bundle (three P1: writes ignore `--db` when the control API answers; JSON export/import drops group and settings; `audio dictionary list` fails on app databases). `defer: separate Snipset session, the next CLI release`
 
 ## 8. Checklist

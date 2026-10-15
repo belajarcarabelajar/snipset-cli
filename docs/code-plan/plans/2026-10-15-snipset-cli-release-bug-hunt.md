@@ -1,7 +1,7 @@
 ---
 schema: ultra-plan/v1
 plan_id: 2026-10-15-snipset-cli-release-bug-hunt
-status: In Progress
+status: Complete
 version: 1
 runner_contract: true
 defaults:
@@ -204,8 +204,8 @@ Path: Bounded, upgraded to Architectural if a confirmed root cause crosses into 
 - [x] FU2: live wrapper prints doctor's reason on a refused write (D3). Evidence: `tests/snipset-live-doctor-message.test.mjs` RED 1/2 then GREEN 2/2; `tests/snipset-live*.test.mjs` 147 pass 0 fail; README line and its pinned section hash updated, `readme-install` 24 pass.
 - [x] FU3: explicit timeout for the CLI-spawning pentest-core tests (D1). Evidence: 60000 ms per test, 15000 ms per child; `bun test tests/pentest-core.test.mjs` 9/9 twice idle and twice under six `yes` loads (load average 9.5 to 10.5).
 - [x] FU4: pathenv.sh SC2016 disabled with its reason (D5). Evidence: `shellcheck -s bash scripts/installer/sh/*.sh scripts/snipset-live.sh` exit 0.
-- [ ] Closeout: runner log, `plan-mark-done`, `plan-closeout --readiness`, `Close plan` gate
-- [ ] Graph index: `graphify update .` then `bun run graphify:sync` and `graphify:check`
+- [x] Closeout: runner log, `plan-mark-done`, `plan-closeout --readiness`, `Close plan` gate. Evidence (2026-10-15): `bun ~/vivera/scripts/ultra-plan-runner.mjs <plan> --execute` from the repository root exit 0, 14 of 14 tasks `SKIPPED-IDEMPOTENT (skip_if exit 0)`, Error Ledger empty; `plan-mark-done --from runner.log` 14 considered, 0 open step lines; `plan-closeout.mjs --readiness` exit 0, `readiness: READY`, 14 DONE, open NOW follow-ups 0, open step boxes 0; `Close plan` answered Mark Complete.
+- [x] Graph index: `graphify update .` then `bun run graphify:sync` and `graphify:check`. Evidence (worktree, `graphify-out/` gitignored): `graphify update .` exit 0; `graphify-sync.mjs --root "$(pwd)"` dry run 42 eligible docs, nodes 1461 -> 1839, then write exit 0; `--check` exit 0 CURRENT 1839 -> 1839; `graphify query` returns 30 lines naming this session's documents.
 
 ## Visual implementation map
 
