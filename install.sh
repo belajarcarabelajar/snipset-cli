@@ -188,7 +188,7 @@ Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
   --no-init          Skip creating the standalone database.
   --no-shell         Skip shell integration.
   --no-shims         Skip generating trigger shims.
-  --with-mcp         Write ~/.config/opencode/opencode.json if absent.
+  --with-mcp         Write $XDG_CONFIG_HOME (default ~/.config)/opencode/opencode.json if absent.
                      An existing entry is never changed.
   --with-mcp=LIST    Register MCP for LIST: claude,codex,gemini,opencode,cursor,vscode or all.
                      An existing entry is never changed.
@@ -206,8 +206,13 @@ usage() {
   print_usage >&2
   exit 2
 }
+# Empty would mean "absent" for --db and --from, and a leading - is the next flag.
+path_arg() {
+  [[ $# -ge 2 ]] || usage
+  [[ -n "$2" && "$2" != -* ]] || die "$1 needs a path that is not empty and does not start with -" 2
+}
 parse_args() {
-  local raw id wanted known=" claude codex gemini opencode cursor vscode " path_value
+  local raw id wanted known=" claude codex gemini opencode cursor vscode " path_value name
   local -a ids
   repo="belajarcarabelajar/snipset-cli"
   version=""
@@ -228,11 +233,11 @@ parse_args() {
   while (($#)); do
     case "$1" in
       --version) [[ $# -ge 2 ]] || usage; version="$2"; shift 2 ;;
-      --install-dir) [[ $# -ge 2 ]] || usage; install_dir="$2"; shift 2 ;;
-      --share-dir) [[ $# -ge 2 ]] || usage; share_dir="$2"; shift 2 ;;
-      --db) [[ $# -ge 2 ]] || usage; db="$2"; shift 2 ;;
-      --bashrc) [[ $# -ge 2 ]] || usage; bashrc="$2"; shift 2 ;;
-      --from) [[ $# -ge 2 ]] || usage; from_dir="$2"; shift 2 ;;
+      --install-dir) path_arg "$@"; install_dir="$2"; shift 2 ;;
+      --share-dir) path_arg "$@"; share_dir="$2"; shift 2 ;;
+      --db) path_arg "$@"; db="$2"; shift 2 ;;
+      --bashrc) path_arg "$@"; bashrc="$2"; shift 2 ;;
+      --from) path_arg "$@"; from_dir="$2"; shift 2 ;;
       --add-path) add_path=1; shift ;;
       --no-init) do_init=0; shift ;;
       --no-shell) do_shell=0; shift ;;
@@ -265,6 +270,10 @@ parse_args() {
   # Canonical order without duplicates, whatever order or repeats the flags used.
   for id in $known; do
     [[ "$wanted" != *" ${id} "* ]] || mcp_list+="${mcp_list:+ }${id}"
+  done
+  # Paths are written into startup files and MCP configs that run from other directories.
+  for name in install_dir share_dir bashrc db from_dir; do
+    [[ -z "${!name}" || "${!name}" == /* ]] || printf -v "$name" '%s/%s' "${PWD%/}" "${!name}"
   done
   for path_value in "$install_dir" "$share_dir" "$bashrc" "$db" "$from_dir"; do
     # shellcheck disable=SC1003 # '\' is a literal backslash pattern, not a quote escape
@@ -374,7 +383,7 @@ fetch_resolve_version() {
   if [[ -z "$version" && -n "$from_dir" ]]; then
     fetch_from_version
   elif [[ -z "$version" ]]; then
-    version="$(fetch_text "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    version="$(fetch_text "https://api.github.com/repos/${repo}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)" || version=''
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die 'release version was not found'
   else
     [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die 'invalid version' 2
@@ -392,8 +401,9 @@ fetch_release() {
     done
     return 0
   fi
-  fetch_get "${release_url}/SHA256SUMS" "${1}/SHA256SUMS"
-  fetch_get "${release_url}/${archive}" "${1}/${archive}"
+  for name in SHA256SUMS "$archive"; do
+    fetch_get "${release_url}/${name}" "${1}/${name}" || die "download failed: ${release_url}/${name}"
+  done
 }
 binary_verify() {
   local dir="$1" expected actual entry names verbose
@@ -414,7 +424,7 @@ binary_verify() {
 }
 binary_stage() {
   mkdir_recorded "$install_dir"
-  stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
+  stage="$(mktemp -d -- "${install_dir}/.snipset-stage.XXXXXX")"
   # As root, tar would otherwise keep the packer's uid and mode bits.
   tar --no-same-owner --no-same-permissions -xzf "${1}/${archive}" -C "$stage"
   [[ -f "${stage}/snipset" && -x "${stage}/snipset" ]] || { note 'archive has no executable snipset'; rm -rf "$stage"; exit 1; }
@@ -593,15 +603,17 @@ pathenv_line_add() {
   grep -Fqx -- "$line" "$1" || printf '\n%s\n' "$line" >> "$1"
 }
 # Drops each exact line and the blank line written just before it, rewriting in place to keep symlinks.
+# pathenv_line_add always writes a newline before the line, so a non-blank line right before a
+# final managed line means FILE had no final newline, and the strip leaves it without one.
 # Returns 1 when FILE holds no such line and 2 when FILE could not be rewritten.
 pathenv_strip() {
   if ! { [[ -f "$1" ]] && grep -Fqx -- "$2" "$1"; }; then
     return 1
   fi
   rewrite_from "$1" env PATHENV_TARGET="$2" awk '
-    $0 == ENVIRON["PATHENV_TARGET"] { if (held && prev != "") print prev; held = 0; next }
-    { if (held) print prev; prev = $0; held = 1 }
-    END { if (held) print prev }
+    $0 == ENVIRON["PATHENV_TARGET"] { if (held && prev != "") { tail = prev; tailed = 1 } held = 0; next }
+    { if (tailed) print tail; tailed = 0; if (held) print prev; prev = $0; held = 1 }
+    END { if (tailed) printf "%s", tail; else if (held) print prev }
   ' "$1"
 }
 pathenv_marked() {
@@ -836,11 +848,16 @@ shell_bundle_place() {
   fi
   rm -rf "$stage"
 }
-# The marker and the four lines below it, exactly as shell_block_add writes them.
+# The marker and the lines below it, exactly as shell_block_add writes them. With the
+# argument "legacy", the shape installers wrote before the SNIPSET_DB line existed.
 shell_block_lines() {
   printf '%s\n' "$shell_marker"
   # shellcheck disable=SC2016 # $PATH is written literally into .bashrc
   printf 'if ! command -v snipset >/dev/null 2>&1; then export PATH="%s:$PATH"; fi\n' "$install_dir"
+  # The shims, TAB, and completion read SNIPSET_DB; args.sh already refuses " ` \ $ in paths.
+  if [[ -n "$db" && "${1:-}" != legacy ]]; then
+    printf 'export SNIPSET_DB="%s"\n' "$db"
+  fi
   printf '[ -f "%s/snipset.sh" ] && . "%s/snipset.sh"\n' "$share_dir" "$share_dir"
   printf '[ -f "%s/completion.bash" ] && . "%s/completion.bash"\n' "$share_dir" "$share_dir"
   printf '[ -f "%s/tab.sh" ] && . "%s/tab.sh"\n' "$share_dir" "$share_dir"
@@ -852,25 +869,60 @@ shell_block_add() {
       report SKIP 'shell block' "${bashrc} left unchanged; not written by the installer in ${share_dir}: ${shell_kept[*]}"
       return 0
     fi
+    # A bare file name has no parent to create: ${bashrc%/*} would name the file itself.
+    if [[ "$bashrc" == */* && -n "${bashrc%/*}" ]]; then
+      mkdir_recorded "${bashrc%/*}"
+    fi
     touch_recorded "$bashrc"
-    if ! grep -Fq 'snipset-terminal-integration' "$bashrc"; then
+    shell_block_scan
+    if ((shell_block_at < 0)); then
       {
         printf '\n'
         shell_block_lines
       } >> "$bashrc"
+    elif [[ -n "$shell_block_stale" ]]; then
+      # Write in place: a symlinked bashrc must stay a symlink into its dotfiles repo.
+      rewrite_from "$bashrc" shell_block_upgraded || rewrite_fail 'shell block' "$bashrc"
     fi
   fi
 }
+# Prints the scanned bashrc with its stale block replaced by the current one.
+shell_block_upgraded() {
+  local i out=""
+  for i in "${!shell_rc_lines[@]}"; do
+    if ((i == shell_block_at)); then
+      out+="$(shell_block_lines)"$'\n'
+    fi
+    ((i >= shell_block_at && i < shell_block_at + shell_block_len)) && continue
+    out+="${shell_rc_lines[i]}"$'\n'
+  done
+  ((shell_rc_newline)) || out="${out%$'\n'}"
+  printf '%s' "$out"
+}
+# Returns 0 when the lines from shell_block_at + OFFSET on start with the other arguments.
+shell_block_match() {
+  local i="$1" want
+  shift
+  for want in "$@"; do
+    [[ "${shell_rc_lines[shell_block_at + i]-}" == "$want" ]] || return 1
+    i=$((i + 1))
+  done
+}
 # Reads $bashrc into shell_rc_lines and sets shell_rc_newline (1 when the file
 # ends in a newline), shell_block_at (index of the first marker line, -1 when
-# absent), and shell_block_exact (1 when the marker and its four lines match).
+# absent), shell_block_exact (1 when the block matches shell_block_lines),
+# shell_block_stale ("without" for the legacy shape, "other" for the current shape
+# with any other SNIPSET_DB line or one --db no longer asks for, "" otherwise), and
+# shell_block_len (the line count of the shape that matched).
 shell_block_scan() {
-  local line i
+  local line i re='^export SNIPSET_DB="[^"]*"$'
   local -a want
   shell_rc_lines=()
   shell_rc_newline=1
   shell_block_at=-1
   shell_block_exact=0
+  shell_block_stale=""
+  shell_block_len=0
   [[ -f "$bashrc" ]] || return 0
   line=""
   while IFS= read -r line; do
@@ -888,13 +940,20 @@ shell_block_scan() {
   done
   ((shell_block_at >= 0)) || return 0
   mapfile -t want < <(shell_block_lines)
-  shell_block_exact=1
-  for i in "${!want[@]}"; do
-    if [[ "${shell_rc_lines[shell_block_at + i]-}" != "${want[i]}" ]]; then
-      shell_block_exact=0
-      return 0
-    fi
-  done
+  if shell_block_match 0 "${want[@]}"; then
+    shell_block_exact=1
+    shell_block_len=${#want[@]}
+    return 0
+  fi
+  mapfile -t want < <(shell_block_lines legacy)
+  if shell_block_match 0 "${want[@]}"; then
+    shell_block_stale=without
+    shell_block_len=${#want[@]}
+  elif shell_block_match 0 "${want[@]:0:2}" && [[ "${shell_rc_lines[shell_block_at + 2]-}" =~ $re ]] &&
+    shell_block_match 3 "${want[@]:2}"; then
+    shell_block_stale=other
+    shell_block_len=$((${#want[@]} + 1))
+  fi
 }
 shell_check() {
   local name path
@@ -920,6 +979,12 @@ shell_check() {
     report MISSING 'shell block' "$bashrc"
   elif ((shell_block_exact)); then
     report OK 'shell block' "$bashrc"
+  elif [[ "$shell_block_stale" == without ]]; then
+    report DRIFT 'shell block' "${bashrc} holds a block without the SNIPSET_DB line for --db; re-run the install"
+  elif [[ -n "$shell_block_stale" && -n "$db" ]]; then
+    report DRIFT 'shell block' "${bashrc} holds a block that exports another SNIPSET_DB; re-run the install"
+  elif [[ -n "$shell_block_stale" ]]; then
+    report DRIFT 'shell block' "${bashrc} holds a block that exports SNIPSET_DB, but --db was not given; re-run the install"
   else
     report DRIFT 'shell block' "${bashrc} holds the marker with other lines"
   fi
@@ -941,7 +1006,7 @@ shell_manifest_remove() {
   fi
 }
 shell_remove() {
-  local name path i start end out=""
+  local name path i start end last trim=0 out=""
   # Without the shell bundle these names may hold the user's own files.
   if ! ((do_shell)); then
     report SKIP shell '--no-shell, nothing to remove'
@@ -971,19 +1036,27 @@ shell_remove() {
   shell_block_scan
   if ((shell_block_at < 0)); then
     report SKIP 'shell block' "none in ${bashrc}"
-  elif ! ((shell_block_exact)); then
+  elif ! ((shell_block_exact)) && [[ -z "$shell_block_stale" ]]; then
     report KEEP 'shell block' 'edited; remove it by hand'
   else
     start=$shell_block_at
-    end=$((shell_block_at + 4))
+    end=$((shell_block_at + shell_block_len - 1))
+    last=$((${#shell_rc_lines[@]} - 1))
     if ((start > 0)) && [[ -z "${shell_rc_lines[start - 1]}" ]]; then
       start=$((start - 1))
+    elif ((start > 0 && end == last)); then
+      # The install writes "\n" before the marker, so a non-blank line just before it
+      # means the file had no final newline until the install added one.
+      trim=1
     fi
     for i in "${!shell_rc_lines[@]}"; do
       ((i >= start && i <= end)) && continue
       out+="${shell_rc_lines[i]}"$'\n'
     done
-    if [[ -n "$out" ]] && ! ((shell_rc_newline)) && ((end < ${#shell_rc_lines[@]} - 1)); then
+    if ((end < last)) && ! ((shell_rc_newline)); then
+      trim=1
+    fi
+    if [[ -n "$out" ]] && ((trim)); then
       out="${out%$'\n'}"
     fi
     # Write in place: a symlinked bashrc must stay a symlink into its dotfiles repo.
@@ -1135,7 +1208,15 @@ mcp_cli() {
 }
 mcp_file() {
   case "$1" in
-    opencode) printf '%s' "${HOME}/.config/opencode/opencode.json" ;;
+    opencode)
+      local file="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/opencode.json"
+      local legacy="${HOME}/.config/opencode/opencode.json"
+      # v0.2.0 wrote the legacy path even with XDG_CONFIG_HOME set; that file stays the
+      # one to check and uninstall until an XDG file exists.
+      if [[ "$file" != "$legacy" && ! -e "$file" && -f "$legacy" ]]; then
+        file="$legacy"
+      fi
+      printf '%s' "$file" ;;
     cursor) printf '%s' "${HOME}/.cursor/mcp.json" ;;
     vscode) printf '%s' "${XDG_CONFIG_HOME:-${HOME}/.config}/Code/User/mcp.json" ;;
   esac
@@ -1245,7 +1326,7 @@ mcp_scoped_detail() {
 # (the binary is registered in a scope the installer does not own), and for
 # claude a second word naming the scope.
 mcp_probe() {
-  local id="$1" cli out line cmd="" text
+  local id="$1" cli out line cmd="" text re
   cli="$(mcp_cli "$id")"
   case "$id" in
     claude|codex|gemini)
@@ -1275,12 +1356,20 @@ mcp_probe() {
         return 0
       fi
       text="$(cat -- "$(mcp_file "$id")")"
-      if [[ "$text" == *"\"${snipset_bin}\""* ]]; then
-        printf 'mine'
-      elif [[ "$text" == *'"snipset"'* ]]; then
-        printf 'foreign'
-      else
+      if [[ "$text" != *'"snipset"'* ]]; then
         printf 'other'
+        return 0
+      fi
+      # Only the "snipset" object's own command counts; one nested object (env) is stepped over,
+      # deeper nesting stays foreign. opencode holds the command as an array led by the binary.
+      re='"snipset"[[:space:]]*:[[:space:]]*\{([^{}]|\{[^{}]*\})*"command"[[:space:]]*:[[:space:]]*'
+      [[ "$id" != opencode ]] || re+='\[[[:space:]]*'
+      re+='"([^"]*)"'
+      text="${text//$'\n'/ }"
+      if [[ "$text" =~ $re ]] && [[ "${BASH_REMATCH[2]}" == "$snipset_bin" ]]; then
+        printf 'mine'
+      else
+        printf 'foreign'
       fi ;;
   esac
 }
@@ -1449,9 +1538,7 @@ install_dry_run() {
   local -a ids
   platform_require
   fetch_tools_require
-  if [[ -z "$version" && -z "$from_dir" ]]; then
-    fetch_resolve_version
-  fi
+  fetch_resolve_version
   printf '[DRY] platform: require %s\n' "$target"
   if [[ -n "$from_dir" ]]; then
     printf '[DRY] tools: require tar; sha256sum, shasum, or openssl\n'
@@ -1459,7 +1546,7 @@ install_dry_run() {
     printf '[DRY] tools: require curl or wget; tar; sha256sum, shasum, or openssl\n'
   fi
   if [[ -n "$pinned" ]]; then
-    printf '[DRY] version: use %s\n' "$pinned"
+    printf '[DRY] version: use %s\n' "$version"
   elif [[ -n "$from_dir" ]]; then
     printf '[DRY] version: read from %s/SHA256SUMS\n' "$from_dir"
   else
@@ -1571,6 +1658,9 @@ dirs_candidates() {
     case "$id" in
       opencode|cursor) targets+=("$(dirname "$(mcp_file "$id")")") ;;
     esac
+    # v0.2.0 created this dir even with XDG_CONFIG_HOME set, and mcp_file stops naming
+    # it once mcp_remove deletes the file there.
+    [[ "$id" != opencode ]] || targets+=("${HOME}/.config/opencode")
   done
   for target in "${targets[@]}"; do
     path="$target"

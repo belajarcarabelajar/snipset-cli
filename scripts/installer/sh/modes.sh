@@ -40,9 +40,7 @@ install_dry_run() {
   local -a ids
   platform_require
   fetch_tools_require
-  if [[ -z "$version" && -z "$from_dir" ]]; then
-    fetch_resolve_version
-  fi
+  fetch_resolve_version
   printf '[DRY] platform: require %s\n' "$target"
   if [[ -n "$from_dir" ]]; then
     printf '[DRY] tools: require tar; sha256sum, shasum, or openssl\n'
@@ -50,7 +48,7 @@ install_dry_run() {
     printf '[DRY] tools: require curl or wget; tar; sha256sum, shasum, or openssl\n'
   fi
   if [[ -n "$pinned" ]]; then
-    printf '[DRY] version: use %s\n' "$pinned"
+    printf '[DRY] version: use %s\n' "$version"
   elif [[ -n "$from_dir" ]]; then
     printf '[DRY] version: read from %s/SHA256SUMS\n' "$from_dir"
   else
@@ -162,6 +160,9 @@ dirs_candidates() {
     case "$id" in
       opencode|cursor) targets+=("$(dirname "$(mcp_file "$id")")") ;;
     esac
+    # v0.2.0 created this dir even with XDG_CONFIG_HOME set, and mcp_file stops naming
+    # it once mcp_remove deletes the file there.
+    [[ "$id" != opencode ]] || targets+=("${HOME}/.config/opencode")
   done
   for target in "${targets[@]}"; do
     path="$target"

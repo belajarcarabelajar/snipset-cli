@@ -18,7 +18,7 @@ binary_verify() {
 }
 binary_stage() {
   mkdir_recorded "$install_dir"
-  stage="$(mktemp -d "${install_dir}/.snipset-stage.XXXXXX")"
+  stage="$(mktemp -d -- "${install_dir}/.snipset-stage.XXXXXX")"
   # As root, tar would otherwise keep the packer's uid and mode bits.
   tar --no-same-owner --no-same-permissions -xzf "${1}/${archive}" -C "$stage"
   [[ -f "${stage}/snipset" && -x "${stage}/snipset" ]] || { note 'archive has no executable snipset'; rm -rf "$stage"; exit 1; }
