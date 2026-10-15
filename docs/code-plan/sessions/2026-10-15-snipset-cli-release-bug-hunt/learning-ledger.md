@@ -35,3 +35,8 @@
 | 2 | `tool-economy` | discovery repros lived in scratch and had to be re-pointed at the new bundle by copying `install.sh` into two repro dirs | repro scripts take the installer path from an env var (H01, H02, H12 already did) | NO-OP (scratch, not repository) |
 
 Steering no-ops: none found.
+
+## Global promotion
+
+- Rule 4 (scratch directory) promoted to `~/AGENTS.md` on 2026-10-15 after the `Promote` gate was answered "Promote this rule". The same edit corrected the example path in the existing rule A14 from `$HOME/.cache/<proyek>-scratch` to `$HOME/.cache/tmp/<proyek>-scratch`, because the old example pointed at a directory the rm guard will not clean. Backup: `~/AGENTS.md.bak-20261015-scratch`; revert: `cp ~/AGENTS.md.bak-20261015-scratch ~/AGENTS.md`.
+- Session scratch cleanup: the `Destructive` gate was answered "Give me the delete command"; the owner runs the printed `find ... -newermt '2026-10-15 00:00' -exec rm -rf {} +` because the rm guard blocks the agent outside /tmp and ~/.cache/tmp.
