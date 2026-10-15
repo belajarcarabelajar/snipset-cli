@@ -112,6 +112,50 @@ tasks:
       - cmd: "timeout 600 bun test --timeout 200000 tests/install-ps1-mcp-probe.test.mjs tests/install-ps1-mcp.test.mjs"
         expect_exit: 0
         retry: 1
+  - id: FU1
+    depends_on: [T09]
+    impacts: ["dry-run output for --from and the shell block - bun test tests/install-cli.test.mjs tests/install-lifecycle.test.mjs tests/install-dryrun-validate.test.mjs"]
+    files: { create: [tests/install-dryrun-followups.test.mjs], modify: [scripts/installer/sh/modes.sh, tests/install-cli.test.mjs, install.sh], test: [tests/install-dryrun-followups.test.mjs] }
+    idempotency_key: "FU1:dryrun-followups"
+    skip_if: "timeout 300 bun test --timeout 120000 tests/install-dryrun-followups.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 400 bun test --timeout 120000 tests/install-dryrun-followups.test.mjs tests/install-cli.test.mjs tests/install-dryrun-validate.test.mjs tests/install-lifecycle.test.mjs"
+        expect_exit: 0
+        retry: 1
+  - id: FU2
+    depends_on: [T05]
+    impacts: ["write refusal message of scripts/snipset-live.sh - bun test tests/snipset-live-hardening.test.mjs tests/snipset-live.test.mjs"]
+    files: { create: [tests/snipset-live-doctor-message.test.mjs], modify: [scripts/snipset-live.sh], test: [tests/snipset-live-doctor-message.test.mjs] }
+    idempotency_key: "FU2:live-doctor-message"
+    skip_if: "timeout 120 bun test tests/snipset-live-doctor-message.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 200 bun test tests/snipset-live-doctor-message.test.mjs tests/snipset-live.test.mjs tests/snipset-live-hardening.test.mjs tests/snipset-live-routing.test.mjs tests/snipset-live-reads.test.mjs"
+        expect_exit: 0
+        retry: 1
+  - id: FU3
+    depends_on: []
+    impacts: ["CLI-spawning pentest tests under machine load - bun test tests/pentest-core.test.mjs"]
+    files: { create: [], modify: [tests/pentest-core.test.mjs], test: [tests/pentest-core.test.mjs] }
+    idempotency_key: "FU3:pentest-timeout"
+    skip_if: "timeout 300 bun test tests/pentest-core.test.mjs"
+    verify_exit: 0
+    run:
+      - cmd: "timeout 300 bun test tests/pentest-core.test.mjs"
+        expect_exit: 0
+        retry: 1
+  - id: FU4
+    depends_on: [T04]
+    impacts: ["shellcheck over every installer part - shellcheck -s bash scripts/installer/sh/*.sh"]
+    files: { create: [], modify: [scripts/installer/sh/pathenv.sh, install.sh], test: [] }
+    idempotency_key: "FU4:sc2016"
+    skip_if: "shellcheck -s bash scripts/installer/sh/pathenv.sh"
+    verify_exit: 0
+    run:
+      - cmd: "shellcheck -s bash scripts/installer/sh/pathenv.sh"
+        expect_exit: 0
+        retry: 0
   - id: T09
     depends_on: [T01, T02, T03, T04, T05, T06, T07, T08, T10]
     impacts: ["committed install.sh and install.ps1 equal their parts - bun scripts/installer/build.mjs --check", "README claims - bun test tests/readme-install.test.mjs", "whole suite - bun test tests/", "real v0.2.0 assets - SNIPSET_REAL_ASSETS=~/.cache/parent-v020 bun test tests/install-real-assets.test.mjs"]
@@ -154,8 +198,12 @@ Path: Bounded, upgraded to Architectural if a confirmed root cause crosses into 
 - [x] Repro re-run: the 19 repo-side repro commands (R1 to R12, R15) go green, R13 and R14 stay as documented behaviour. Evidence: `bash ~/.cache/parent-verify-fixed.sh`: 21 of 22 commands exit 0 (H02-a and H12-a each in two variants); H04-a exits 1 only on its harness line that requires a `snipset` entry the installer by contract never writes into an existing cursor file, and both defect signatures (`already registered`, `[OK] cursor`) are absent (`rg -c` rc=1); X-H01-b and X-H04-c (R14, R13) stay red as approved.
 - [x] Regression: `bun test tests/` 0 failures, real-asset suite green, shellcheck clean on the changed parts. Evidence: `bun test tests/` exit 0, 693 pass, 6 skip, 0 fail, 699 tests across 49 files, 162.09 s; real-asset suite exit 0, 4 pass; shellcheck exit 0 on every changed part except `pathenv.sh`, whose one SC2016 info is pre-existing at HEAD (also exit 1 there).
 - [x] Verification fan-out: independent re-run, sibling-caller audit, two-axis diff review (`staid`), findings resolved. Evidence: `docs/code-plan/sessions/2026-10-15-snipset-cli-release-bug-hunt/review-report.md`; spec P1 (nested object) and standards P2 (stale export), P3 (v0.2.0 opencode path), P3 (README) fixed with RED then GREEN; final `bun test tests/` exit 0, 702 pass, 0 fail; `build.mjs --check` exit 0.
-- [ ] Deliver: commit by explicit path on the session branch, `state verified`, PR opened with `--body-file`, registered
-- [ ] Sweep: session-close debt sweep, learning ledger, MEMORY.md, follow-up question
+- [x] Deliver: commit by explicit path on the session branch, `state verified`, PR opened with `--body-file`, registered. Evidence: commits 27dd315, 53c8a06, and the PR body commit staged by explicit path; `pr-registry state verified`; `gh pr create --body-file` gave #10; `pr-registry pr release-bug-hunt --number 10` shows `open #10`.
+- [x] Sweep: session-close debt sweep, learning ledger, MEMORY.md, follow-up question. Evidence: `follow-ups.md` (15 debts, 5 offered), `learning-ledger.md` (4 KEEP rules), MEMORY.md task group added, `AskUserQuestion` answered: all five selected.
+- [x] FU1: dry run `--from` parity and the shell block line (D2, D4). Evidence: `tests/install-dryrun-followups.test.mjs` RED 2/6 then GREEN 6/6; neighbour suites 42 pass 0 fail; parent diff audit of `modes.sh` and the `install-cli` fixture.
+- [x] FU2: live wrapper prints doctor's reason on a refused write (D3). Evidence: `tests/snipset-live-doctor-message.test.mjs` RED 1/2 then GREEN 2/2; `tests/snipset-live*.test.mjs` 147 pass 0 fail; README line and its pinned section hash updated, `readme-install` 24 pass.
+- [x] FU3: explicit timeout for the CLI-spawning pentest-core tests (D1). Evidence: 60000 ms per test, 15000 ms per child; `bun test tests/pentest-core.test.mjs` 9/9 twice idle and twice under six `yes` loads (load average 9.5 to 10.5).
+- [x] FU4: pathenv.sh SC2016 disabled with its reason (D5). Evidence: `shellcheck -s bash scripts/installer/sh/*.sh scripts/snipset-live.sh` exit 0.
 - [ ] Closeout: runner log, `plan-mark-done`, `plan-closeout --readiness`, `Close plan` gate
 - [ ] Graph index: `graphify update .` then `bun run graphify:sync` and `graphify:check`
 
@@ -164,7 +212,7 @@ Path: Bounded, upgraded to Architectural if a confirmed root cause crosses into 
 ```mermaid
 flowchart LR
     accTitle: Fix tasks and their integration order
-    accDescr: Eight independent fix tasks each own one installer part or the live wrapper and add one new test file. All eight feed the parent integration task, which rebuilds the bundled installers, updates the README, and runs the whole suite.
+    accDescr: Nine independent fix tasks each own one installer part or the live wrapper and add one new test file. All feed the parent integration task, which rebuilds the bundled installers, updates the README, and runs the whole suite. Four debt-sweep follow-ups hang off the tasks whose files they touch.
     T01["T01 args.sh, binary.sh<br/>R1 R2 R3"] --> T09
     T02["T02 modes.sh<br/>R4"] --> T09
     T03["T03 shell.sh<br/>R5 R6 R15"] --> T09
@@ -175,6 +223,10 @@ flowchart LR
     T08["T08 mcp.sh<br/>R11 R12"] --> T09
     T10["T10 mcp.ps1<br/>R11 R12 sibling"] --> T09
     T09["T09 parent: rebuild install.sh and install.ps1,<br/>README, bun test tests/"]
+    T09 --> FU1["FU1 modes.sh<br/>dry run parity"]
+    T05 --> FU2["FU2 snipset-live.sh<br/>doctor reason"]
+    FU3["FU3 pentest-core<br/>timeouts"]
+    T04 --> FU4["FU4 pathenv.sh<br/>SC2016"]
 ```
 
 ## Approval
@@ -285,6 +337,22 @@ Every chunk tests against a private bundle (HEAD parts plus its own part, built 
 **Files:** Modify `scripts/installer/ps1/mcp.ps1`; Create `tests/install-ps1-mcp-probe.test.mjs`.
 **Behaviour:** `Get-SnipsetMcpState` calls a cursor, opencode, or vscode file `mine` only when its `snipset` entry's own command is the installed binary (opencode: first element of the command array), with the same states as `mcp.sh` after T08. On non-Windows, the opencode and vscode files honour `XDG_CONFIG_HOME` like `mcp.sh`; Windows paths are unchanged.
 **Tests (names start `ps1 mcp probe:`):** a file holding only `snipset-dev` with the same binary is not reported as registered; a foreign `snipset` plus a sibling using the binary is `foreign`; with `XDG_CONFIG_HOME` set on Linux, the opencode file is written under it and uninstall removes it.
+
+### Task FU1: dry run parity follow-ups (D2, D4)
+**Files:** Modify `scripts/installer/sh/modes.sh`, `tests/install-cli.test.mjs` (fixture only); Create `tests/install-dryrun-followups.test.mjs`; parent regenerates `install.sh`.
+**Behaviour:** `--dry-run --from DIR` fails like the real run when `DIR/SHA256SUMS` or the archive is missing; the dry run prints `[DRY] shell block: keep`, `upgrade`, or `add to` according to what the real run would do.
+
+### Task FU2: doctor reason on a refused write (D3)
+**Files:** Modify `scripts/snipset-live.sh`; Create `tests/snipset-live-doctor-message.test.mjs`.
+**Behaviour:** when the doctor gate refuses a write, doctor's own stderr is printed after the wrapper's two lines; exit code 3 unchanged.
+
+### Task FU3: pentest-core timeouts (D1)
+**Files:** Modify `tests/pentest-core.test.mjs`.
+**Behaviour:** tests that spawn the real `snipset` carry an explicit timeout large enough for a loaded machine; assertions unchanged.
+
+### Task FU4: SC2016 in pathenv.sh (D5)
+**Files:** Modify `scripts/installer/sh/pathenv.sh`; parent regenerates `install.sh`.
+**Behaviour:** a scoped `# shellcheck disable=SC2016` with the reason on the awk program; no code change.
 
 ### Task T09: integrate
 **Files:** Modify `install.sh`, `install.ps1` (regenerated), `README.md` (opencode path, snipset-live read groups, `--db` and shims). **Owner:** parent.

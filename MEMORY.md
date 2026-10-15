@@ -33,3 +33,12 @@ Source: `docs/code-plan/sessions/2026-10-12-snipset-cli-deferred-hardening/learn
 - WHEN a change makes an installer start a program it already started in the same path → DO reuse the first result and compare the suite wall time before and after, NOT accept a green run. Measured: a second `--version` start of the Linux fixture (about 35 s each) pushed a platform test past 60 s; the ps1 suites went from 92 s to 178 s.
 - WHEN a test environment is scrubbed → DO check that the tests still reach the same code paths (the installer's notes in the output), NOT only that they pass. Measured: the default tool set sent the legacy tests through the glibc "could not determine" fallback and dropped `timeout` from the smoke run.
 - WHEN an installer change alters what uninstall removes → DO run the upgrade path once in a temp HOME (the previous release's `install.sh`, then the new install and uninstall) before review, NOT rely on simulated older installs. Measured: only that run showed the default share dir left behind, which the previous uninstall removed.
+
+## Task Group: snipset-cli / release bug hunt (discovery fan-out, probes, scratch)
+
+Source: `docs/code-plan/sessions/2026-10-15-snipset-cli-release-bug-hunt/learning-ledger.md` (PR #10).
+
+- WHEN a discovery or review subagent must both probe and write repros → DO give it one surface, a probe budget, and a "write the report at half the turns" line, NOT a list of hypotheses to exhaust. Measured: seven of nineteen such agents hit their 30 or 40 turn cap with no report.
+- WHEN a task spec states the expected report line of a `--check` or probe state → DO read the test that already pins that state first, NOT write the expectation from the bug description (T08's DRIFT expectation contradicted `tests/install-mcp.test.mjs`).
+- WHEN a probe reads a JSON file users can edit (opencode, cursor, vscode MCP configs) → DO test it with a nested object before the target key and a pretty-printed file, NOT only the shape the installer writes. A flat-only fixture let a P1 pass six green tests.
+- WHEN a subagent contract names a scratch directory on this machine → DO use `/tmp/<id>-*` or `~/.cache/tmp/<id>-*`, NOT `~/.cache/<id>-*`: the rm guard refuses deletes elsewhere, and about 1 GB including live-database copies was left behind.
