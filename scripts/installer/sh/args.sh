@@ -17,7 +17,7 @@ Usage: install.sh [--version VERSION] [--install-dir DIR] [--add-path]
   --no-init          Skip creating the standalone database.
   --no-shell         Skip shell integration.
   --no-shims         Skip generating trigger shims.
-  --with-mcp         Write ~/.config/opencode/opencode.json if absent.
+  --with-mcp         Write $XDG_CONFIG_HOME (default ~/.config)/opencode/opencode.json if absent.
                      An existing entry is never changed.
   --with-mcp=LIST    Register MCP for LIST: claude,codex,gemini,opencode,cursor,vscode or all.
                      An existing entry is never changed.
@@ -35,8 +35,13 @@ usage() {
   print_usage >&2
   exit 2
 }
+# Empty would mean "absent" for --db and --from, and a leading - is the next flag.
+path_arg() {
+  [[ $# -ge 2 ]] || usage
+  [[ -n "$2" && "$2" != -* ]] || die "$1 needs a path that is not empty and does not start with -" 2
+}
 parse_args() {
-  local raw id wanted known=" claude codex gemini opencode cursor vscode " path_value
+  local raw id wanted known=" claude codex gemini opencode cursor vscode " path_value name
   local -a ids
   repo="belajarcarabelajar/snipset-cli"
   version=""
@@ -57,11 +62,11 @@ parse_args() {
   while (($#)); do
     case "$1" in
       --version) [[ $# -ge 2 ]] || usage; version="$2"; shift 2 ;;
-      --install-dir) [[ $# -ge 2 ]] || usage; install_dir="$2"; shift 2 ;;
-      --share-dir) [[ $# -ge 2 ]] || usage; share_dir="$2"; shift 2 ;;
-      --db) [[ $# -ge 2 ]] || usage; db="$2"; shift 2 ;;
-      --bashrc) [[ $# -ge 2 ]] || usage; bashrc="$2"; shift 2 ;;
-      --from) [[ $# -ge 2 ]] || usage; from_dir="$2"; shift 2 ;;
+      --install-dir) path_arg "$@"; install_dir="$2"; shift 2 ;;
+      --share-dir) path_arg "$@"; share_dir="$2"; shift 2 ;;
+      --db) path_arg "$@"; db="$2"; shift 2 ;;
+      --bashrc) path_arg "$@"; bashrc="$2"; shift 2 ;;
+      --from) path_arg "$@"; from_dir="$2"; shift 2 ;;
       --add-path) add_path=1; shift ;;
       --no-init) do_init=0; shift ;;
       --no-shell) do_shell=0; shift ;;
@@ -94,6 +99,10 @@ parse_args() {
   # Canonical order without duplicates, whatever order or repeats the flags used.
   for id in $known; do
     [[ "$wanted" != *" ${id} "* ]] || mcp_list+="${mcp_list:+ }${id}"
+  done
+  # Paths are written into startup files and MCP configs that run from other directories.
+  for name in install_dir share_dir bashrc db from_dir; do
+    [[ -z "${!name}" || "${!name}" == /* ]] || printf -v "$name" '%s/%s' "${PWD%/}" "${!name}"
   done
   for path_value in "$install_dir" "$share_dir" "$bashrc" "$db" "$from_dir"; do
     # shellcheck disable=SC1003 # '\' is a literal backslash pattern, not a quote escape
