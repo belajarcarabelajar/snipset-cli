@@ -59,6 +59,7 @@ pathenv_strip() {
   if ! { [[ -f "$1" ]] && grep -Fqx -- "$2" "$1"; }; then
     return 1
   fi
+  # shellcheck disable=SC2016 # $0 and ENVIRON are awk syntax, expanded by awk, not the shell
   rewrite_from "$1" env PATHENV_TARGET="$2" awk '
     $0 == ENVIRON["PATHENV_TARGET"] { if (held && prev != "") { tail = prev; tailed = 1 } held = 0; next }
     { if (tailed) print tail; tailed = 0; if (held) print prev; prev = $0; held = 1 }

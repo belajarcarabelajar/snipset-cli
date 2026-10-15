@@ -106,9 +106,11 @@ done
 if ((is_read)); then
   exec snipset --db "$snap" "${fwd[@]}"
 fi
-if ! snipset --db "$live" doctor >/dev/null 2>&1; then
+# Capture only doctor's stderr, in one run, so a refusal can say why.
+if ! doctor_err=$(snipset --db "$live" doctor 2>&1 >/dev/null); then
   echo 'snipset-live: refusing write: live database is locked or unreachable.' >&2
   echo 'snipset-live: close Snipset Desktop, then retry. Reads remain available from the snapshot.' >&2
+  if [[ -n "$doctor_err" ]]; then printf '%s\n' "$doctor_err" >&2; fi
   exit 3
 fi
 exec snipset --db "$live" "${fwd[@]}"
