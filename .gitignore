@@ -1,2 +1,9 @@
 # graphify knowledge graph: derived state, rebuilt by `graphify update .`
 graphify-out/
+
+# Secrets and local env (added 2026-10-16 after Cloudflare secrets audit)
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
