@@ -14,10 +14,16 @@ env:
   SAME_REPO: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
 
 jobs:
+  # Split by file duration (tests/timings.json) across parallel jobs; Actions minutes are free on a public repo.
   test:
+    name: test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -40,7 +46,7 @@ jobs:
           echo "$RUNNER_TEMP/snipset" >> "$GITHUB_PATH"
           echo "SNIPSET_REAL_ASSETS=$assets" >> "$GITHUB_ENV"
       - run: bun install --frozen-lockfile || bun install
-      - run: bun test tests/
+      - run: bun test --shard=${{ matrix.shard }}/4 --timings=tests/timings.json tests/
 
   drift:
     runs-on: ubuntu-latest
