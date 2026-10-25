@@ -141,20 +141,46 @@ jobs:
   aur:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
+    permissions:
+      contents: write
     steps:
-      - name: Install git and unzip
-        run: pacman -Syu --noconfirm --needed git unzip
+      - name: Install git, unzip, shellcheck, and gh
+        run: pacman -Syu --noconfirm --needed git unzip shellcheck github-cli
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - name: Download and verify the release assets
+        if: env.SAME_REPO == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=/tmp/snipset-assets
+          gh release download "v$(cat packaging/VERSION)" -R "$GITHUB_REPOSITORY" -D "$assets"
+          (cd "$assets" && sha256sum -c SHA256SUMS)
+          chmod -R a+rX "$assets"
+          echo "SNIPSET_REAL_ASSETS=$assets" >> "$GITHUB_ENV"
       # makepkg refuses to run as root.
       - name: makepkg tests as a regular user
         run: |
           useradd -m builder
           install -Dm755 "$(command -v bun)" /usr/local/bin/bun
           chown -R builder: .
-          su builder -c 'bun test tests/packaging-aur.test.mjs'
+          su builder -c "SNIPSET_REAL_ASSETS='${SNIPSET_REAL_ASSETS:-}' bun test tests/packaging-aur.test.mjs tests/install-real-assets.test.mjs"
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: nix flake check
+        env:
+          SNIPSET_NIX_CHECK: "1"
+        run: bun test tests/packaging-nix.test.mjs
 
   homebrew:
     runs-on: ubuntu-latest
