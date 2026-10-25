@@ -6,19 +6,19 @@ The v0.2.0 release is a Draft until it is published. Until then only the owner c
 
 ## Install matrix
 
-Status on 2026-10-12.
+Status on 2026-10-25. CI (`.github/workflows/test.yml`) runs every check named below on each push.
 
 | Channel | Status |
 | --- | --- |
 | `install.sh` on Arch Linux x86_64 | verified: the sandboxed installer suites (`tests/install*.test.mjs`) plus an install of the real v0.2.0 assets in a temp HOME (`tests/install-real-assets.test.mjs`) |
-| `install.sh` on Debian, Ubuntu, Fedora, WSL | not verified: no container runs; glibc 2.34 and OpenSSL 3 are required |
+| `install.sh` on Debian, Ubuntu, Fedora, WSL | not verified: only Ubuntu runs, in CI on `ubuntu-latest` (the installer suites plus `tests/install-real-assets.test.mjs`); Debian, Fedora, and WSL have none; glibc 2.34 and OpenSSL 3 are required |
 | `install.sh --from` (offline) | verified: same runs as above |
-| `install.ps1` on Windows x64 | not verified on Windows: runs under PowerShell 7.6.6 on Linux against fixtures and the real zip, which proves runtime faults only |
-| Scoop | not verified: no Windows; the manifest passes the vendored Scoop schema |
+| `install.ps1` on Windows x64 | verified: CI on `windows-latest` installs the real v0.2.0 zip with `-From` under PowerShell 7 and Windows PowerShell 5.1, then runs `-Check`, `snipset --version`, and `-Uninstall`; the download path is not exercised while the release is a Draft |
+| Scoop | not verified: CI does not run Scoop; the manifest passes the vendored Scoop schema |
 | winget | not submitted: the manifests pass the vendored 1.12.0 schemas |
 | AUR | not published: the package builds with makepkg on Arch from the real tarball, and its binary runs |
-| Homebrew tap | not verified: brew is absent; structural checks only |
-| Nix flake | not verified: nix is absent; structural checks and the hash only |
+| Homebrew tap | verified: CI on `ubuntu-latest` installs the formula from a local tap with the verified tarball, then runs `brew test` and `brew audit --strict`; `brew tap` from this repo and the download are not exercised while the release is a Draft |
+| Nix flake | not verified: CI runs `nix flake check`, which evaluates the flake but builds and runs nothing; structural checks and the hash |
 | mise, eget, ubi | not verified: the tools are absent |
 | `gh release download` | verified: owner account, Draft release |
 
@@ -237,7 +237,7 @@ Nix (x86_64-linux), from `flake.nix` in this repo:
 nix run github:belajarcarabelajar/snipset-cli
 ```
 
-The package is marked `unfree` because of the EULA in `LICENSE`. The flake imports nixpkgs with `allowUnfree = true` for its own package, so you do not change your Nix config for it. This was not run, because nix is not installed on the test machine.
+The package is marked `unfree` because of the EULA in `LICENSE`. The flake imports nixpkgs with `allowUnfree = true` for its own package, so you do not change your Nix config for it. CI evaluates the flake with `nix flake check`; `nix run` has not been tried.
 
 Maintainers: every manifest above is rendered from `packaging/VERSION` and `packaging/SHA256SUMS` by `bun scripts/packaging/render.mjs`, and `--check` fails when a committed file differs. After changing the version, delete the previous version's folder under `packaging/winget/manifests` before running `--check`.
 
