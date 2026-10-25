@@ -2,7 +2,6 @@ class Snipset < Formula
   desc "Terminal companion for the Snipset snippet manager"
   homepage "https://github.com/belajarcarabelajar/snipset-cli"
   url "https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.2.0/snipset-cli-v0.2.0-x86_64-unknown-linux-gnu.tar.gz"
-  version "0.2.0"
   sha256 "57b43b6ee0b55fc690cac8851d2c5009eefdc10e538fb5683bc294cf8c78cfe5"
   license :cannot_represent
 

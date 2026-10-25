@@ -64,8 +64,10 @@ describe("Homebrew formula", () => {
     expect(match?.[1]).toBe(LINUX_SHA);
   });
 
-  test("version equals packaging/VERSION", () => {
-    expect(formula()).toContain(`  version "${VERSION}"\n`);
+  // brew audit --strict rejects a version stanza that repeats the version scanned from the URL.
+  test("version comes from the URL, not a version stanza", () => {
+    expect(formula()).toContain(`/releases/download/v${VERSION}/snipset-cli-v${VERSION}-`);
+    expect(formula()).not.toMatch(/^ {2}version /m);
   });
 
   test("desc and homepage are set", () => {
