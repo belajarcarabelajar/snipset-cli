@@ -4,16 +4,55 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+# Jobs that need the real release assets download them with GITHUB_TOKEN. While the release is a Draft,
+# only a token with push access can see it, so those jobs ask for contents: write and skip the download
+# on pull requests from forks (their token is read-only). The tests that need the assets then skip.
+env:
+  SAME_REPO: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+
 jobs:
   test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install bsdtar for the install.ps1 zip tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libarchive-tools
+      - name: Download and verify the release assets
+        if: env.SAME_REPO == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v$(cat packaging/VERSION)"
+          assets="$RUNNER_TEMP/assets"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "$assets"
+          (cd "$assets" && sha256sum -c SHA256SUMS)
+          mkdir -p "$RUNNER_TEMP/snipset"
+          tar -xzf "$assets/snipset-cli-$tag-x86_64-unknown-linux-gnu.tar.gz" -C "$RUNNER_TEMP/snipset"
+          echo "$RUNNER_TEMP/snipset" >> "$GITHUB_PATH"
+          echo "SNIPSET_REAL_ASSETS=$assets" >> "$GITHUB_ENV"
+      - run: bun install --frozen-lockfile || bun install
+      - run: bun test tests/
+
+  drift:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - run: bun install --frozen-lockfile || bun install
-      - run: bun test tests/
+      - name: install.sh and install.ps1 match their parts
+        run: bun scripts/installer/build.mjs --check
+      - name: Packaging manifests match their templates
+        run: bun scripts/packaging/render.mjs --check
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -37,3 +76,138 @@ jobs:
         with:
           scandir: .
           severity: warning
+
+  psscriptanalyzer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run PSScriptAnalyzer
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          $found = foreach ($file in 'install.ps1', 'tests/install.Tests.ps1') {
+            Invoke-ScriptAnalyzer -Path $file -Settings ./PSScriptAnalyzerSettings.psd1
+          }
+          $found | Format-Table ScriptName, Line, Severity, RuleName, Message -AutoSize -Wrap
+          if ($found) { throw "PSScriptAnalyzer: $(@($found).Count) findings" }
+
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [pwsh, powershell]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Contract check
+        run: ./tests/install.Tests.ps1
+      - name: Download and verify the release assets
+        if: env.SAME_REPO == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'v' + (Get-Content -Raw packaging/VERSION).Trim()
+          $assets = Join-Path $env:RUNNER_TEMP 'assets'
+          gh release download $tag -R $env:GITHUB_REPOSITORY -D $assets
+          if ($LASTEXITCODE -ne 0) { throw "gh release download exited $LASTEXITCODE" }
+          foreach ($line in Get-Content (Join-Path $assets 'SHA256SUMS')) {
+            $sum, $name = $line -split '\s+', 2
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $assets $name)).Hash
+            if ($actual -ne $sum) { throw "checksum mismatch: $name" }
+          }
+          "SNIPSET_TAG=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SNIPSET_ASSETS=$assets" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Install, check, run, and uninstall the real release
+        if: env.SAME_REPO == 'true'
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'snipset-bin'
+          ./install.ps1 -Version $env:SNIPSET_TAG -From $env:SNIPSET_ASSETS -InstallDir $dir
+          ./install.ps1 -Version $env:SNIPSET_TAG -InstallDir $dir -Check
+          $out = & (Join-Path $dir 'snipset.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw "snipset --version exited $LASTEXITCODE" }
+          $want = 'snipset ' + ($env:SNIPSET_TAG -replace '^v', '')
+          if ($out -notmatch [regex]::Escape($want)) { throw "expected '$want', got '$out'" }
+          ./install.ps1 -InstallDir $dir -Uninstall
+          if (Test-Path -LiteralPath (Join-Path $dir 'snipset.exe')) { throw 'snipset.exe is still there after -Uninstall' }
+
+  aur:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install git and unzip
+        run: pacman -Syu --noconfirm --needed git unzip
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      # makepkg refuses to run as root.
+      - name: makepkg tests as a regular user
+        run: |
+          useradd -m builder
+          install -Dm755 "$(command -v bun)" /usr/local/bin/bun
+          chown -R builder: .
+          su builder -c 'bun test tests/packaging-aur.test.mjs'
+
+  homebrew:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify the Linux release
+        if: env.SAME_REPO == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v$(cat packaging/VERSION)"
+          assets="$RUNNER_TEMP/assets"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "$assets" -p SHA256SUMS -p '*-x86_64-unknown-linux-gnu.tar.gz'
+          (cd "$assets" && sha256sum -c --ignore-missing SHA256SUMS)
+          echo "SNIPSET_TARBALL=$assets/snipset-cli-$tag-x86_64-unknown-linux-gnu.tar.gz" >> "$GITHUB_ENV"
+      # The formula URL is the public download URL, which answers 404 while the release is a Draft,
+      # so the verified tarball is put where brew looks before it downloads.
+      - name: Install, test, and audit the formula
+        if: env.SAME_REPO == 'true'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+        run: |
+          set -euo pipefail
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew tap-new --no-git local/snipset
+          cp Formula/snipset.rb "$(brew --repository local/snipset)/Formula/"
+          cache="$(brew --cache --formula local/snipset/snipset)"
+          mkdir -p "$(dirname "$cache")"
+          cp "$SNIPSET_TARBALL" "$cache"
+          brew install --formula local/snipset/snipset
+          brew test local/snipset/snipset
+          brew audit --strict --formula local/snipset/snipset
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No macOS build is published, so install.sh must stop with a clear message under both the stock
+      # bash 3.2 and a current bash, instead of failing on syntax or a missing tool.
+      - name: install.sh refuses macOS cleanly
+        run: |
+          set -euo pipefail
+          expect() {
+            local bash_bin=$1 want=$2 out rc
+            out=$("$bash_bin" install.sh --version v0.2.0 --dry-run 2>&1) && rc=0 || rc=$?
+            echo "$bash_bin -> exit $rc: $out"
+            [ "$rc" -eq 1 ] || { echo "expected exit 1"; return 1; }
+            grep -qF "$want" <<<"$out" || { echo "expected: $want"; return 1; }
+          }
+          brew list bash >/dev/null 2>&1 || brew install bash
+          expect /bin/bash 'bash 4.4 or newer is required'
+          expect "$(brew --prefix)/bin/bash" 'no macOS build is published yet'
