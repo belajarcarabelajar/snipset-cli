@@ -7,19 +7,11 @@ on:
 permissions:
   contents: read
 
-# Jobs that need the real release assets download them with GITHUB_TOKEN. While the release is a Draft,
-# only a token with push access can see it, so those jobs ask for contents: write and skip the download
-# on pull requests from forks (their token is read-only). The tests that need the assets then skip.
-env:
-  SAME_REPO: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-
 jobs:
   # Split by file duration (tests/timings.json) across parallel jobs; Actions minutes are free on a public repo.
   test:
     name: test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +24,6 @@ jobs:
       - name: Install bsdtar for the install.ps1 zip tests
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libarchive-tools
       - name: Download and verify the release assets
-        if: env.SAME_REPO == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -102,8 +93,6 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -115,31 +104,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Contract check
         run: ./tests/install.Tests.ps1
-      - name: Download and verify the release assets
-        if: env.SAME_REPO == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # The real one-liner path: install.ps1 downloads the public release and checks it against SHA256SUMS.
+      - name: Install, check, run, and uninstall the published release
         run: |
           $tag = 'v' + (Get-Content -Raw packaging/VERSION).Trim()
-          $assets = Join-Path $env:RUNNER_TEMP 'assets'
-          gh release download $tag -R $env:GITHUB_REPOSITORY -D $assets
-          if ($LASTEXITCODE -ne 0) { throw "gh release download exited $LASTEXITCODE" }
-          foreach ($line in Get-Content (Join-Path $assets 'SHA256SUMS')) {
-            $sum, $name = $line -split '\s+', 2
-            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $assets $name)).Hash
-            if ($actual -ne $sum) { throw "checksum mismatch: $name" }
-          }
-          "SNIPSET_TAG=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          "SNIPSET_ASSETS=$assets" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      - name: Install, check, run, and uninstall the real release
-        if: env.SAME_REPO == 'true'
-        run: |
           $dir = Join-Path $env:RUNNER_TEMP 'snipset-bin'
-          ./install.ps1 -Version $env:SNIPSET_TAG -From $env:SNIPSET_ASSETS -InstallDir $dir
-          ./install.ps1 -Version $env:SNIPSET_TAG -InstallDir $dir -Check
+          ./install.ps1 -Version $tag -InstallDir $dir
+          ./install.ps1 -Version $tag -InstallDir $dir -Check
           $out = & (Join-Path $dir 'snipset.exe') --version
           if ($LASTEXITCODE -ne 0) { throw "snipset --version exited $LASTEXITCODE" }
-          $want = 'snipset ' + ($env:SNIPSET_TAG -replace '^v', '')
+          $want = 'snipset ' + ($tag -replace '^v', '')
           if ($out -notmatch [regex]::Escape($want)) { throw "expected '$want', got '$out'" }
           ./install.ps1 -InstallDir $dir -Uninstall
           if (Test-Path -LiteralPath (Join-Path $dir 'snipset.exe')) { throw 'snipset.exe is still there after -Uninstall' }
@@ -147,8 +121,6 @@ jobs:
   aur:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
-    permissions:
-      contents: write
     steps:
       - name: Install git, unzip, shellcheck, and gh
         run: pacman -Syu --noconfirm --needed git unzip shellcheck github-cli
@@ -157,7 +129,6 @@ jobs:
         with:
           bun-version: 1.4.4
       - name: Download and verify the release assets
-        if: env.SAME_REPO == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -173,7 +144,7 @@ jobs:
           useradd -m builder
           install -Dm755 "$(command -v bun)" /usr/local/bin/bun
           chown -R builder: .
-          su builder -c "SNIPSET_REAL_ASSETS='${SNIPSET_REAL_ASSETS:-}' bun test tests/packaging-aur.test.mjs tests/install-real-assets.test.mjs"
+          su builder -c "SNIPSET_REAL_ASSETS='$SNIPSET_REAL_ASSETS' bun test tests/packaging-aur.test.mjs tests/install-real-assets.test.mjs"
 
   nix:
     runs-on: ubuntu-latest
@@ -190,25 +161,10 @@ jobs:
 
   homebrew:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Download and verify the Linux release
-        if: env.SAME_REPO == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tag="v$(cat packaging/VERSION)"
-          assets="$RUNNER_TEMP/assets"
-          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "$assets" -p SHA256SUMS -p '*-x86_64-unknown-linux-gnu.tar.gz'
-          (cd "$assets" && sha256sum -c --ignore-missing SHA256SUMS)
-          echo "SNIPSET_TARBALL=$assets/snipset-cli-$tag-x86_64-unknown-linux-gnu.tar.gz" >> "$GITHUB_ENV"
-      # The formula URL is the public download URL, which answers 404 while the release is a Draft,
-      # so the verified tarball is put where brew looks before it downloads.
+      # A local tap holds this checkout's formula; brew downloads the public tarball and checks its sha256.
       - name: Install, test, and audit the formula
-        if: env.SAME_REPO == 'true'
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_ANALYTICS: "1"
@@ -217,9 +173,6 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew tap-new --no-git local/snipset
           cp Formula/snipset.rb "$(brew --repository local/snipset)/Formula/"
-          cache="$(brew --cache --formula local/snipset/snipset)"
-          mkdir -p "$(dirname "$cache")"
-          cp "$SNIPSET_TARBALL" "$cache"
           brew install --formula local/snipset/snipset
           brew test local/snipset/snipset
           brew audit --strict --formula local/snipset/snipset

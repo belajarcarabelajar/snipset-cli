@@ -88,12 +88,10 @@ describe("README install coverage", () => {
     }
   });
 
-  test("the Draft caveat is in the intro and in Known limits", () => {
-    const intro = readme.slice(0, readme.indexOf("\n## "));
-    expect(intro).toContain("Draft");
-    const limits = section("Known limits");
-    expect(limits).toContain("Draft");
-    expect(limits).toContain("only the owner");
+  // v0.2.0 was published on 2026-10-25, so no channel waits on a Draft any more.
+  test("no Draft caveat is left once the release is published", () => {
+    expect(readme).not.toMatch(/\bDraft\b/);
+    expect(readme).not.toContain("only the owner");
   });
 
   test("Known limits names every documented limit", () => {

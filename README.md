@@ -2,8 +2,6 @@
 
 Install the `snipset` terminal companion on Linux x64 or Windows x64 from release assets. This repository holds the installers, the package manifests, and the release documentation. The CLI source and the native builds are private.
 
-The v0.2.0 release is a Draft until it is published. Until then only the owner can download it, so every channel below fails for other users. See [Known limits](#known-limits).
-
 ## Install matrix
 
 Status on 2026-10-25. CI (`.github/workflows/test.yml`) runs every check named below on each push.
@@ -13,18 +11,18 @@ Status on 2026-10-25. CI (`.github/workflows/test.yml`) runs every check named b
 | `install.sh` on Arch Linux x86_64 | verified: the sandboxed installer suites (`tests/install*.test.mjs`) plus an install of the real v0.2.0 assets in a temp HOME (`tests/install-real-assets.test.mjs`) |
 | `install.sh` on Debian, Ubuntu, Fedora, WSL | not verified: only Ubuntu runs, in CI on `ubuntu-latest` (the installer suites plus `tests/install-real-assets.test.mjs`); Debian, Fedora, and WSL have none; glibc 2.34 and OpenSSL 3 are required |
 | `install.sh --from` (offline) | verified: same runs as above |
-| `install.ps1` on Windows x64 | verified: CI on `windows-latest` installs the real v0.2.0 zip with `-From` under PowerShell 7 and Windows PowerShell 5.1, then runs `-Check`, `snipset --version`, and `-Uninstall`; the download path is not exercised while the release is a Draft |
+| `install.ps1` on Windows x64 | verified: CI on `windows-latest` downloads and installs the published v0.2.0 zip under PowerShell 7 and Windows PowerShell 5.1, then runs `-Check`, `snipset --version`, and `-Uninstall` |
 | Scoop | not verified: CI does not run Scoop; the manifest passes the vendored Scoop schema |
 | winget | not submitted: the manifests pass the vendored 1.12.0 schemas |
 | AUR | not published: the package builds with makepkg on Arch from the real tarball, and its binary runs |
-| Homebrew tap | verified: CI on `ubuntu-latest` installs the formula from a local tap with the verified tarball, then runs `brew test` and `brew audit --strict`; `brew tap` from this repo and the download are not exercised while the release is a Draft |
+| Homebrew tap | verified: CI on `ubuntu-latest` installs the formula from a local tap, downloading the published tarball, then runs `brew test` and `brew audit --strict`; `brew tap` from this repo is not exercised |
 | Nix flake | not verified: CI runs `nix flake check`, which evaluates the flake but builds and runs nothing; structural checks and the hash |
 | mise, eget, ubi | not verified: the tools are absent |
-| `gh release download` | verified: owner account, Draft release |
+| `gh release download` | verified: CI downloads the published assets with it on every run |
 
 ## Linux x64
 
-Download the installer, read it, then install a pinned release. The `v0.2.0` URL works once that tag exists; the tag is created when the Draft release is published.
+Download the installer, read it, then install a pinned release.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.sh -o install-snipset.sh
@@ -321,7 +319,6 @@ The CLI works against a standalone database created by `snipset init`, or agains
 
 ## Known limits
 
-- The release is a Draft: until it is published, only the owner can download it, and every channel above fails for others.
 - Linux needs x86_64, glibc 2.34 or newer, `libcrypto.so.3` (OpenSSL 3), and bash 4.4 or newer.
 - macOS, ARM, and musl (Alpine) are refused.
 - Windows 10 on Arm is refused; Windows 11 on Arm runs the x64 build under emulation.
