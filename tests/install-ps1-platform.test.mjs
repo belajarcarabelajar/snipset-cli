@@ -62,7 +62,7 @@ async function withWorkspace(fn) {
     await mkdir(home);
     await mkdir(tmp);
     const env = { ...process.env };
-    for (const name of ["LOCALAPPDATA", "OS", "SNIPSET_INSTALL_ALLOW_NON_WINDOWS"]) delete env[name];
+    for (const name of ["LOCALAPPDATA", "OS", "XDG_CONFIG_HOME", "SNIPSET_INSTALL_ALLOW_NON_WINDOWS"]) delete env[name];
     Object.assign(env, {
       HOME: home,
       TMPDIR: tmp,

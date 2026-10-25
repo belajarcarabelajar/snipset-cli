@@ -67,7 +67,7 @@ async function withWorkspace(fn, { tmpName = "tmp" } = {}) {
     await mkdir(home);
     await mkdir(tmp);
     const env = { ...process.env };
-    for (const name of ["LOCALAPPDATA", "OS"]) delete env[name];
+    for (const name of ["LOCALAPPDATA", "OS", "XDG_CONFIG_HOME"]) delete env[name];
     Object.assign(env, {
       HOME: home,
       TMPDIR: tmp,
