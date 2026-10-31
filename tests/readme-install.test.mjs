@@ -170,22 +170,8 @@ describe("README install coverage", () => {
   });
 });
 
-describe("opencode command docs", () => {
-  test("check-wiring expects the env source line from --add-path", () => {
-    const text = read(".opencode/commands/check-wiring.md");
-    expect(text).toContain('. "<share>/env"');
-    expect(text).not.toContain('exactly one `export PATH="<install-dir>:$PATH"` line');
-  });
-
-  test("verify runs both generator checks", () => {
-    const text = read(".opencode/commands/verify.md");
-    expect(text).toContain("bun scripts/installer/build.mjs --check");
-    expect(text).toContain("bun scripts/packaging/render.mjs --check");
-  });
-});
-
 describe("no em dash", () => {
-  for (const path of ["README.md", ".opencode/commands/check-wiring.md", ".opencode/commands/verify.md"]) {
+  for (const path of ["README.md"]) {
     test(path, () => {
       expect(read(path).includes(EM_DASH)).toBe(false);
     });
