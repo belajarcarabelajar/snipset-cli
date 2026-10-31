@@ -97,7 +97,8 @@ async function routingFixture() {
   const snapDir = join(dir, "snap");
   const log = join(dir, "stub-argv.log");
   const stub = join(binDir, "snipset");
-  await writeFile(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\nexit 0\n`);
+  // Exit 2 on backup, like snipset 0.2.0, so a refresh takes the file-copy path and the probe stays out of the log.
+  await writeFile(stub, `#!/bin/sh\n[ "$1" = backup ] && exit 2\nprintf '%s\\n' "$*" >> "${log}"\nexit 0\n`);
   await chmod(stub, 0o755);
   const env = {
     ...process.env,
