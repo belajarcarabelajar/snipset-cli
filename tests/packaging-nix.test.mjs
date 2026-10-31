@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -223,4 +223,17 @@ describe("nix flake", () => {
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/^error:/m);
     expect(r.status).toBe(0);
   }, 610000);
+
+  // The CI nix job runs `nix build .#default` before this file; its out-link ./result holds the packaged binary.
+  const built = process.env.SNIPSET_NIX_BUILD === "1";
+  if (!built) console.log("skip nix build run: set SNIPSET_NIX_BUILD=1 after nix build .#default has left ./result");
+  test.skipIf(!built)("the snipset that nix build .#default leaves in ./result runs and prints the packaging/VERSION version", () => {
+    const exe = join(repo, "result", "bin", "snipset");
+    expect(existsSync(exe), `${exe} is missing; run nix build .#default first`).toBe(true);
+    const r = spawnSync(exe, ["--version"], { encoding: "utf8", timeout: 30000, env: { PATH: "/usr/bin:/bin", HOME: tempDir() } });
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    // A release build from 0.3.0 on appends its 12-hex build commit: `snipset 0.3.0 (abcdef012345)`.
+    const version = readVersion().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(r.stdout.trim()).toMatch(new RegExp(`^snipset ${version}( \\([0-9a-f]{12}\\))?$`));
+  });
 });
