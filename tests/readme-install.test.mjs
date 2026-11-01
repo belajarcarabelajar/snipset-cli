@@ -7,7 +7,9 @@ import { join } from "node:path";
 const repo = join(import.meta.dir, "..");
 const read = (path) => readFileSync(join(repo, path), "utf8");
 const readme = read("README.md");
-const version = read("packaging/VERSION").trim();
+// The adopted release, from the v0.3.0 tag and its asset names, so the README pins are not
+// checked against packaging/VERSION, the file they must agree with (asserted below).
+const version = "0.3.0";
 const EM_DASH = String.fromCharCode(0x2014);
 
 function section(heading) {
@@ -93,11 +95,19 @@ describe("README install coverage", () => {
     expect(needles.filter((needle) => !limits.includes(needle))).toEqual([]);
   });
 
-  test("the Windows zip line names snipset.exe and LICENSE", () => {
-    const line = section("Manual downloads").split("\n").find((entry) => entry.includes("x86_64-pc-windows-msvc.zip"));
-    expect(line).toBeDefined();
-    expect(line).toContain("`snipset.exe`");
-    expect(line).toContain("`LICENSE`");
+  // The members that tar -tzf and unzip -l list in the v0.3.0 assets.
+  test("the archive lines name every member of the release archives", () => {
+    const text = section("Manual downloads").split("\n");
+    const linux = text.find((entry) => entry.includes(`snipset-cli-v${version}-x86_64-unknown-linux-gnu.tar.gz`)) ?? "";
+    const windows = text.find((entry) => entry.includes(`snipset-cli-v${version}-x86_64-pc-windows-msvc.zip`)) ?? "";
+    const members = {
+      linux: ["`snipset`", "`LICENSE`", "`THIRD-PARTY-NOTICES.txt`", "`shell/`", "`snipset.sh`", "`completion.bash`", "`tab.sh`", "`snipset-shims.sh`"],
+      windows: ["`snipset.exe`", "`LICENSE`", "`THIRD-PARTY-NOTICES.txt`"],
+    };
+    expect({
+      linux: members.linux.filter((member) => !linux.includes(member)),
+      windows: members.windows.filter((member) => !windows.includes(member)),
+    }).toEqual({ linux: [], windows: [] });
   });
 
   test("the pinned one-liners point at the release tag", () => {
@@ -144,7 +154,7 @@ describe("README install coverage", () => {
     expect(firstAt).toBeGreaterThanOrEqual(0);
     expect(readme.indexOf(last, firstAt)).toBeGreaterThan(firstAt);
     const body = section("Querying the live database (companion workflow)");
-    expect(createHash("sha256").update(body).digest("hex")).toBe("96f1140ae424e44bdfd8f8e28ff23bae3496fc52b630ba3632a756da24c34185");
+    expect(createHash("sha256").update(body).digest("hex")).toBe("b002353bf4de70daf29766284e8749942ba93b56742e14747f8d081f834e64e6");
   });
 });
 
@@ -216,7 +226,7 @@ describe("README what it does", () => {
       ["`install.sh` on Debian, Fedora, WSL", "untested"],
       ["`install.sh --from` (offline)", "verified"],
       ["`install.ps1` on Windows x64", "verified"],
-      ["Scoop", "manifest only"],
+      ["Scoop", "verified"],
       ["winget", "manifest only"],
       ["AUR", "manifest only"],
       ["Homebrew tap", "verified"],
@@ -241,7 +251,7 @@ describe("README what it does", () => {
       ["Linux x64", "`install.sh` is ", ["verified on Arch Linux and Ubuntu", "untested on Debian, Fedora, and WSL"]],
       ["Offline install", "`--from DIR` ", ["(verified)", "`gh release download` (verified)"]],
       ["Windows x64", "`install.ps1` is ", ["verified"]],
-      ["Package managers", "Scoop (", ["(Windows, manifest only)"]],
+      ["Package managers", "Scoop (", ["(Windows, verified)"]],
       ["Package managers", "winget (", ["(Windows, manifest only)"]],
       ["Package managers", "AUR (", ["(Arch Linux, manifest only)"]],
       ["Package managers", "Homebrew (", ["(Linux only, verified)"]],
@@ -289,6 +299,75 @@ describe("README what it does", () => {
   });
 });
 
+// Lines that may still name v0.2.0 because they say what changed in 0.3.0. The last one sits in
+// the companion section, whose bytes a test above pins.
+const HISTORY_NOTES = [
+  "| `backup` |",
+  "- v0.2.0 needed `libcrypto-3-x64.dll`",
+  "With an older CLI, such as v0.2.0,",
+];
+// sha256 of LICENSE inside both v0.3.0 archives, equal to Snipset main's LICENSE at bee81a23b.
+const EULA_SHA256 = "b834925d2d7db5880b5e68eb8fa96b2a3a130aba9c9867c18e6db9b19ad63826";
+
+describe("README adopts 0.3.0", () => {
+  test("adopt 0.3.0: packaging/VERSION names the release the README pins", () => {
+    expect(read("packaging/VERSION")).toBe(`${version}\n`);
+  });
+
+  test("adopt 0.3.0: v0.2.0 is named only where the README says what changed", () => {
+    const lines = readme.split("\n").filter((line) => line.includes("0.2.0"));
+    expect(lines.filter((line) => !HISTORY_NOTES.some((note) => line.includes(note)))).toEqual([]);
+  });
+
+  test("adopt 0.3.0: the installer examples pin the release", () => {
+    const linux = fencedLines(section("Linux x64")).filter((line) => line.includes("--version"));
+    expect(linux.length).toBe(3);
+    expect(linux.filter((line) => !line.includes(`--version v${version} `))).toEqual([]);
+    const windows = section("Windows x64");
+    const oneLiner = fencedLines(windows).find((line) => line.includes("/install.ps1).Content")) ?? "";
+    expect(oneLiner).toEndWith(`-Version v${version} -AddPath`);
+    expect(fencedLines(windows)).toContain(`.\\install.ps1 -Version v${version} -From .\\snipset-assets`);
+    expect(tableRows(windows).find((line) => cells(line)[0] === "`-Version`")).toContain("`v" + version + "`");
+  });
+
+  test("adopt 0.3.0: the intro says the CLI is free to use under section 7 of the Snipset EULA in LICENSE", () => {
+    const intro = readme.slice(0, readme.indexOf("\n## "));
+    const phrases = ["free to use", "section 7 of the Snipset EULA", "[`LICENSE`](LICENSE)"];
+    expect(phrases.filter((phrase) => !intro.includes(phrase))).toEqual([]);
+  });
+
+  test("adopt 0.3.0: LICENSE is the EULA the release archives ship, with the section 7 the README cites", () => {
+    const license = readFileSync(join(repo, "LICENSE"));
+    expect(createHash("sha256").update(license).digest("hex")).toBe(EULA_SHA256);
+    expect(license.toString("utf8")).toContain("\n## 7. SNIPSET CLI\n");
+    expect(license.toString("utf8")).toContain("is licensed to you free of charge");
+  });
+
+  test("adopt 0.3.0: the Windows notes describe the static exe and keep one line on what v0.2.0 needed", () => {
+    const text = section("Windows x64");
+    const phrases = [
+      "From v0.3.0, `snipset.exe` is static",
+      "names only DLLs that ship with Windows",
+      "needs no OpenSSL or Visual C++ runtime DLLs",
+    ];
+    expect(phrases.filter((phrase) => !text.includes(phrase))).toEqual([]);
+    const old = text.split("\n").filter((line) => line.includes("0.2.0"));
+    expect(old.length).toBe(1);
+    expect(old[0]).toStartWith("- v0.2.0 needed ");
+  });
+
+  test("adopt 0.3.0: Known limits lists no Windows DLL", () => {
+    expect(section("Known limits")).not.toMatch(/\.dll\b/i);
+  });
+
+  test("adopt 0.3.0: the matrix evidence names the v0.3.0 assets that CI installs", () => {
+    const rows = tableRows(section("Install matrix")).map(cells);
+    const status = (channel) => rows.find((row) => row[0] === channel)?.[1] ?? "";
+    expect(status("`install.sh` on Arch Linux x86_64")).toContain(`the real v${version} assets`);
+    expect(status("`install.ps1` on Windows x64")).toContain(`the published v${version} zip`);
+  });
+});
+
 describe("no em dash", () => {
   for (const path of ["README.md"]) {
     test(path, () => {
@@ -306,11 +385,10 @@ describe("deferred hardening notes", () => {
     expect(readme).toContain("- The Homebrew formula relies on the host's `libcrypto.so.3` (OpenSSL 3) and glibc 2.34 or newer.");
   });
 
-  test("deferred hardening: the Windows notes name the two DLLs the zip does not ship", () => {
-    const text = section("Windows x64");
-    expect(text).toContain("`libcrypto-3-x64.dll`");
-    expect(text).toContain("`VCRUNTIME140.dll`");
-    expect(section("Known limits")).toContain("`libcrypto-3-x64.dll` and `VCRUNTIME140.dll`");
+  test("deferred hardening: the Windows notes name the two DLLs the v0.2.0 zip did not ship", () => {
+    const line = section("Windows x64").split("\n").find((entry) => entry.startsWith("- v0.2.0 needed ")) ?? "";
+    expect(line).toContain("`libcrypto-3-x64.dll`");
+    expect(line).toContain("`VCRUNTIME140.dll`");
     // The installer's own message sends the reader here.
     expect(read("scripts/installer/ps1/binary.ps1")).toContain("see the README Windows notes");
   });

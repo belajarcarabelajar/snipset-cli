@@ -13,6 +13,8 @@ const repo = join(import.meta.dir, "..");
 const version = readFileSync(join(repo, "packaging", "VERSION"), "utf8").trim();
 const linuxAsset = `snipset-cli-v${version}-x86_64-unknown-linux-gnu.tar.gz`;
 const windowsAsset = `snipset-cli-v${version}-x86_64-pc-windows-msvc.zip`;
+// A release build from 0.3.0 on appends its 12-hex build commit: `snipset 0.3.0 (abcdef012345)`.
+const versionLine = new RegExp(`^snipset ${version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\([0-9a-f]{12}\\))?$`);
 if (!assets) console.log("install-real-assets: skipped, set SNIPSET_REAL_ASSETS to a gh release download directory");
 
 const temps = [];
@@ -47,7 +49,7 @@ describe.skipIf(!assets)("real release assets", () => {
       expect(install.code).toBe(0);
       expect(install.stdout).toContain(`Installed snipset v${version}`);
       const run = spawnSync(join(bin, "snipset"), ["--version"], { encoding: "utf8", env: sb.env() });
-      expect(run.stdout.trim()).toBe(`snipset ${version}`);
+      expect(run.stdout.trim()).toMatch(versionLine);
       const check = await runInstaller(sb, ["--check", ...flags]);
       expect(check.code).toBe(0);
       expect(check.stdout).toContain("check: CURRENT");
@@ -101,6 +103,6 @@ describe.skipIf(!assets)("real release assets", () => {
       expect(existsSync(join(extracted, path))).toBe(true);
     }
     const run = spawnSync(join(extracted, "usr", "bin", "snipset"), ["--version"], { encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: env.HOME } });
-    expect(run.stdout.trim()).toBe(`snipset ${version}`);
+    expect(run.stdout.trim()).toMatch(versionLine);
   });
 });
