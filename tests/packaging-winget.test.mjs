@@ -95,6 +95,16 @@ describe("winget manifests", () => {
     expect(doc.NestedInstallerFiles).toEqual([{ RelativeFilePath: "snipset.exe", PortableCommandAlias: "snipset" }]);
   });
 
+  // A portable zip install extracts the whole archive into the package dir; NestedInstallerFiles only picks the alias.
+  test("the README says winget keeps LICENSE and THIRD-PARTY-NOTICES.txt in the install dir", () => {
+    const readme = readFileSync(join(repo, "README.md"), "utf8");
+    const start = readme.indexOf("\n## Package managers\n");
+    const section = readme.slice(start, readme.indexOf("\n## ", start + 1));
+    expect(section).toContain(
+      "Scoop and winget extract the whole zip, so `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay next to `snipset.exe`.",
+    );
+  });
+
   test("the installer points at the Windows asset with the SHA256SUMS digest", () => {
     const doc = parsed(byType("installer"));
     expect(doc.Installers).toHaveLength(1);

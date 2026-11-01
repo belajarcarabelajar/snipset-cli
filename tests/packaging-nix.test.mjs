@@ -174,6 +174,12 @@ describe("nix flake", () => {
     expect(body).toContain("installShellCompletion --bash --name snipset.bash shell/completion.bash");
   });
 
+  // SQLCipher's BSD license requires its notice in binary distributions.
+  test("installPhase installs LICENSE and THIRD-PARTY-NOTICES.txt under share/doc/snipset-cli", () => {
+    const body = /installPhase = ''\n([\s\S]*?)\n\s*'';/.exec(readFlake())[1];
+    expect(body).toContain("install -Dm644 -t $out/share/doc/snipset-cli LICENSE THIRD-PARTY-NOTICES.txt");
+  });
+
   test("meta marks the package unfree, binary-only, x86_64-linux, with snipset as main program", () => {
     const flake = readFlake();
     expect(flake).toContain("license = pkgs.lib.licenses.unfree;");
@@ -235,5 +241,12 @@ describe("nix flake", () => {
     // A release build from 0.3.0 on appends its 12-hex build commit: `snipset 0.3.0 (abcdef012345)`.
     const version = readVersion().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     expect(r.stdout.trim()).toMatch(new RegExp(`^snipset ${version}( \\([0-9a-f]{12}\\))?$`));
+  });
+
+  test.skipIf(!built)("the package nix build .#default leaves in ./result holds both license files", () => {
+    for (const name of ["LICENSE", "THIRD-PARTY-NOTICES.txt"]) {
+      const path = join(repo, "result", "share", "doc", "snipset-cli", name);
+      expect(existsSync(path), `${path} is missing`).toBe(true);
+    }
   });
 });

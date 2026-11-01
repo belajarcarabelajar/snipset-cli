@@ -243,6 +243,8 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 
 These install the binary only, plus on Linux the shims generator and bash completion (AUR and Homebrew also install `snipset.sh` and `tab.sh`). None of them runs the setup steps of `install.sh`.
 
+Every channel also installs `LICENSE` and `THIRD-PARTY-NOTICES.txt`: AUR under `/usr/share/licenses/snipset-cli/`, Homebrew in the formula prefix, and Nix under `share/doc/snipset-cli/`. Scoop and winget extract the whole zip, so `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay next to `snipset.exe`.
+
 Scoop (Windows, verified), from the `bucket/snipset.json` manifest in this repo. CI installs it on every run:
 
 ```powershell

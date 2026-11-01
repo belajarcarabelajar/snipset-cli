@@ -26,6 +26,7 @@ const INSTALLED = {
   "usr/share/snipset-cli/snipset.sh": "-rw-r--r--",
   "usr/share/snipset-cli/tab.sh": "-rw-r--r--",
   "usr/share/licenses/snipset-cli/LICENSE": "-rw-r--r--",
+  "usr/share/licenses/snipset-cli/THIRD-PARTY-NOTICES.txt": "-rw-r--r--",
 };
 
 const HOST_DIRS = ["/usr/bin", "/bin"];
@@ -81,6 +82,16 @@ function run(command, args, options = {}) {
   return spawnSync(command, args, { encoding: "utf8", ...options });
 }
 
+// The shared fixture has no THIRD-PARTY-NOTICES.txt, which every real Linux archive carries since 0.3.0.
+function addNotices(archive, root) {
+  const stage = join(root, "stage");
+  mkdirSync(stage);
+  expect(run(tool("tar"), ["-xzf", archive, "-C", stage]).status).toBe(0);
+  writeFileSync(join(stage, "THIRD-PARTY-NOTICES.txt"), "fixture third-party notices\n");
+  const members = readdirSync(stage).sort();
+  expect(run(tool("tar"), ["-czf", archive, "-C", stage, ...members]).status).toBe(0);
+}
+
 function cacheNames() {
   const cache = join(homedir(), ".cache");
   if (!existsSync(cache)) return new Set();
@@ -112,6 +123,13 @@ describe("AUR package", () => {
     expect(readFileSync(SRCINFO, "utf8")).toContain("\tdepends = glibc\n\tdepends = libgcc\n\tdepends = openssl\n\toptions = !strip\n");
     expect(text).toContain("options=('!strip' '!debug')\n");
     expect(text).toContain(`source_x86_64=("snipset-cli-$pkgver-x86_64.tar.gz::${SOURCE_URL}")\n`);
+  });
+
+  // SQLCipher's BSD license requires its notice in binary distributions.
+  test("package() installs LICENSE and THIRD-PARTY-NOTICES.txt under /usr/share/licenses/$pkgname", () => {
+    const text = readFileSync(PKGBUILD, "utf8");
+    expect(text).toContain('  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"\n');
+    expect(text).toContain('  install -Dm644 THIRD-PARTY-NOTICES.txt "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-NOTICES.txt"\n');
   });
 
   test("PKGBUILD and .SRCINFO checksums equal packaging/SHA256SUMS", () => {
@@ -147,6 +165,7 @@ describe("AUR package", () => {
     const root = tempRoot("snipset-aur-build-");
     const release = fakeLinuxRelease({ version: VERSION });
     temps.push(release.dir);
+    addNotices(release.archive, root);
     const fixtureDigest = createHash("sha256").update(readFileSync(release.archive)).digest("hex");
 
     const original = readFileSync(PKGBUILD, "utf8");

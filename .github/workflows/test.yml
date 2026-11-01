@@ -170,6 +170,12 @@ jobs:
           $patterns = (Join-Path $sys 'libcrypto-*.dll'), (Join-Path $sys 'libssl-*.dll')
           Get-ChildItem -Path $patterns | ForEach-Object { Write-Output "removing $($_.FullName)"; Remove-Item -LiteralPath $_.FullName -Force }
           if (Get-ChildItem -Path $patterns) { throw 'OpenSSL DLLs are still in System32' }
+      - name: Scoop keeps LICENSE and THIRD-PARTY-NOTICES.txt beside snipset.exe
+        run: |
+          $app = Join-Path $env:USERPROFILE 'scoop\apps\snipset\current'
+          foreach ($f in 'snipset.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.txt') {
+            if (-not (Test-Path (Join-Path $app $f))) { throw "$f is missing from $app" }
+          }
       - name: snipset --version with only System32, Windows and the Scoop shims on PATH
         timeout-minutes: 5
         run: |
