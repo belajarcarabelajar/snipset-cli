@@ -114,6 +114,8 @@ case "$cmd $sub" in
   "support categories") is_read=1 ;;
   # export is a leaf, so a second positional is an option value such as `--format csv`.
   "export "*) is_read=1 ;;
+  # backup is a leaf that only reads the database it copies, so a user backup copies the snapshot.
+  "backup "*) is_read=1 ;;
 esac
 # Never forward a user-supplied --db: the wrapper owns the --db target
 # (snapshot for reads, live for gated writes) and a duplicate would let

@@ -20,10 +20,11 @@ const script = join(root, "scripts", "snipset-live.sh");
 const bin = process.env.SNIPSET_DRIFT_BIN || Bun.which("snipset");
 const skip = process.env.SNIPSET_DRIFT_BIN ? false : snipsetSkip;
 
-// Every leaf of snipset 0.2.0, classified from its --help and a before/after
+// Every leaf of snipset 0.3.0, classified from its --help and a before/after
 // dump of a scratch database. Reads run against the snapshot; everything else
 // goes through the doctor gate. pomodoro reads its data from the running app,
-// not the file, so it stays gated with the controls.
+// not the file, so it stays gated with the controls. backup only reads the
+// database it copies, so it copies the snapshot instead of the live file.
 const reads = [
   "snippet list", "snippet get", "snippet search", "snippet expand",
   "group list",
@@ -39,6 +40,7 @@ const reads = [
   "support categories",
   "settings list", "settings get", "settings export",
   "export",
+  "backup",
 ];
 const writes = [
   "doctor", "init", "import", "mcp",
