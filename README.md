@@ -2,27 +2,76 @@
 
 Install the `snipset` terminal companion on Linux x64 or Windows x64 from release assets. This repository holds the installers, the package manifests, and the release documentation. The CLI source and the native builds are private.
 
+## What it does
+
+`snipset` works with Snipset data from a terminal. It uses the database of Snipset Desktop, or a standalone one that `snipset init` creates. `snipset mcp` runs a Model Context Protocol server over stdio, so an AI agent can call Snipset as a tool; the installers register it for six agents (see [MCP registration](#mcp-registration)).
+
+`snipset --help` in 0.3.0 lists these command groups. `--db PATH` (the database to use) and `--json` (machine-readable output) are global options, and `snipset <command> --help` shows the details of each.
+
+| Command | What it does |
+| --- | --- |
+| `doctor` | Verify database access, WAL mode, and schema fingerprint. |
+| `init` | Create a fresh standalone database for headless terminal use. |
+| `snippet` | Read and modify snippets. |
+| `group` | List and create snippet groups. |
+| `clipboard` | Read clipboard history. |
+| `audio` | Read audio history. |
+| `journal` | Read, edit, and generate journals. |
+| `task` | Read and manage tasks. |
+| `note` | Read and manage notes. |
+| `pomodoro` | Read and control the Pomodoro timer through the running app. |
+| `stats` | Read-only statistics over the local database. |
+| `reference` | Read the reference catalog. |
+| `support` | List support categories and submit a ticket. |
+| `settings` | Read and write app settings. |
+| `import` | Bulk-import snippets from a JSON or CSV file. |
+| `export` | Export snippets to JSON or CSV. |
+| `backup` | Copy the database to a file with SQLite's online backup, safe while the app writes. It is new in 0.3.0; v0.2.0 does not have it. |
+| `mcp` | Run the Model Context Protocol server over stdio. |
+
+### Quick examples
+
+Install a pinned release with the downloaded installer (see [Linux x64](#linux-x64)), add it to PATH, and register the MCP server with Claude Code:
+
+```sh
+bash install-snipset.sh --version v0.2.0 --add-path --with-mcp=claude
+```
+
+Create a standalone database. A fresh `install.sh` run already creates one unless you pass `--no-init`; `install.ps1` and the package managers do not. `snipset init` refuses to replace an existing database unless you pass `--force`.
+
+```sh
+snipset init
+```
+
+Search your snippets, then print cross-feature counters as JSON:
+
+```sh
+snipset snippet search "git status"
+snipset --json stats overview
+```
+
 ## Install matrix
 
-Status on 2026-10-25. CI (`.github/workflows/test.yml`) runs every check named below on each push.
+Status on 2026-11-01. CI (`.github/workflows/test.yml`) runs every check named below on each push. Labels: verified means a test installs or runs the channel; manifest only means the package files in this repo pass their checks, but nothing installs through the channel yet; untested means no test runs it.
 
 | Channel | Status |
 | --- | --- |
 | `install.sh` on Arch Linux x86_64 | verified: the sandboxed installer suites (`tests/install*.test.mjs`) plus an install of the real v0.2.0 assets in a temp HOME (`tests/install-real-assets.test.mjs`) |
-| `install.sh` on Debian, Ubuntu, Fedora, WSL | not verified: only Ubuntu runs, in CI on `ubuntu-latest` (the installer suites plus `tests/install-real-assets.test.mjs`); Debian, Fedora, and WSL have none; glibc 2.34 and OpenSSL 3 are required |
-| `install.sh --from` (offline) | verified: same runs as above |
-| `install.ps1` on Windows x64 | verified: CI on `windows-latest` downloads and installs the published v0.2.0 zip under PowerShell 7 and Windows PowerShell 5.1, then runs `-Check`, `snipset --version`, and `-Uninstall` |
-| Scoop | not verified: CI does not run Scoop; the manifest passes the vendored Scoop schema |
-| winget | not submitted: the manifests pass the vendored 1.12.0 schemas |
-| AUR | not published: the package builds with makepkg on Arch from the real tarball, and its binary runs |
+| `install.sh` on Ubuntu | verified: CI on `ubuntu-latest` runs the installer suites plus `tests/install-real-assets.test.mjs` |
+| `install.sh` on Debian, Fedora, WSL | untested: no run covers them; glibc 2.34 and OpenSSL 3 are required |
+| `install.sh --from` (offline) | verified: the same runs as `install.sh` on Arch Linux and Ubuntu |
+| `install.ps1` on Windows x64 | verified: CI on `windows-latest` downloads and installs the published v0.2.0 zip under PowerShell 7 and Windows PowerShell 5.1, then runs `-Check`, `snipset --version`, and `-Uninstall`; the runner image has both DLLs the v0.2.0 exe imports (it starts there), so this run cannot catch their absence on a clean Windows (see [Windows x64](#windows-x64)) |
+| Scoop | manifest only: the manifest passes the vendored Scoop schema; no CI job installs it yet |
+| winget | manifest only: not submitted; the manifests pass the vendored 1.12.0 schemas |
+| AUR | manifest only: not published; the package builds with makepkg on Arch from the real tarball, and its binary runs |
 | Homebrew tap | verified: CI on `ubuntu-latest` installs the formula from a local tap, downloading the published tarball, then runs `brew test` and `brew audit --strict`; `brew tap` from this repo is not exercised |
-| Nix flake | not verified: CI runs `nix flake check`, which evaluates the flake but builds and runs nothing; structural checks and the hash |
-| mise, eget, ubi | not verified: the tools are absent |
+| Nix flake | verified: CI on `ubuntu-latest` builds the package with `nix build .#default` and runs the built `snipset --version` (`tests/packaging-nix.test.mjs` with `SNIPSET_NIX_BUILD=1`) |
+| mise, eget, ubi | untested: no test runs these tools |
 | `gh release download` | verified: CI downloads the published assets with it on every run |
 
 ## Linux x64
 
-Download the installer, read it, then install a pinned release.
+`install.sh` is verified on Arch Linux and Ubuntu and untested on Debian, Fedora, and WSL (see [Install matrix](#install-matrix)). Download the installer, read it, then install a pinned release.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.sh -o install-snipset.sh
@@ -105,7 +154,7 @@ bash install-snipset.sh --uninstall --add-path --with-mcp=claude,opencode
 
 ## Offline install
 
-`--from DIR` installs from a directory that holds `SHA256SUMS` and the Linux archive. Nothing is downloaded, and the checksum is still checked. Without `--version` the installer reads the version from the files in DIR.
+`--from DIR` (verified) installs from a directory that holds `SHA256SUMS` and the Linux archive. Nothing is downloaded, and the checksum is still checked. Without `--version` the installer reads the version from the files in DIR. `gh release download` (verified) fills such a directory:
 
 ```sh
 gh release download v0.2.0 -R belajarcarabelajar/snipset-cli -D snipset-assets
@@ -153,7 +202,7 @@ Older installers wrote `export PATH="<install-dir>:$PATH"` into `~/.profile`. Th
 
 ## Windows x64
 
-Run PowerShell without administrator rights:
+`install.ps1` is verified on Windows x64 (see [Install matrix](#install-matrix)). Run PowerShell without administrator rights:
 
 ```powershell
 & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.ps1).Content)) -Version v0.2.0 -AddPath
@@ -186,21 +235,21 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 - User `Path`: the script reads and writes the raw value in `HKCU\Environment`, so entries such as `%USERPROFILE%\bin` stay unexpanded. It then tells Windows that the environment changed. Open a new terminal to use `snipset`.
 - `-Check` looks at the User `Path` only when you pass `-AddPath`. Pass the same `-InstallDir`, `-WithMcp`, and `-Database` as the install.
 - Parameters are named only; a positional value, such as a stray `-Db x`, is refused before anything is written.
-- The v0.2.0 `snipset.exe` imports `libcrypto-3-x64.dll` (OpenSSL 3) and `VCRUNTIME140.dll` (the Microsoft Visual C++ runtime), and the zip ships neither. This was read from the import table with `objdump -p`, not run on Windows. Without both on the DLL search path the exe cannot start: the installer stops with a message naming them, and the installed `snipset.exe` stays as it was.
+- The v0.2.0 `snipset.exe` imports `libcrypto-3-x64.dll` (OpenSSL 3) and `VCRUNTIME140.dll` (the Microsoft Visual C++ runtime), and the zip ships neither. This was read from the import table with `objdump -p`, not run on Windows. Without both on the DLL search path the exe cannot start: the installer stops with `install.ps1: snipset.exe could not start because Windows could not load a DLL it needs (STATUS_DLL_NOT_FOUND); see the README Windows notes`, and the installed `snipset.exe` stays as it was.
 - An update over a `snipset.exe` that is in use renames it to `snipset.exe.old-<pid>-<8 hex>`. The next install, update, or uninstall deletes those files once the program using them has exited.
 
 ## Package managers
 
 These install the binary only, plus on Linux the shims generator and bash completion (AUR and Homebrew also install `snipset.sh` and `tab.sh`). None of them runs the setup steps of `install.sh`.
 
-Scoop (Windows), from the `bucket/snipset.json` manifest in this repo:
+Scoop (Windows, manifest only), from the `bucket/snipset.json` manifest in this repo. No CI job installs it yet:
 
 ```powershell
 scoop bucket add snipset https://github.com/belajarcarabelajar/snipset-cli
 scoop install snipset/snipset
 ```
 
-winget (Windows). The manifests are not submitted yet. After they are accepted:
+winget (Windows, manifest only). The manifests are not submitted yet. After they are accepted:
 
 ```powershell
 winget install BCBAcademy.SnipsetCLI
@@ -213,14 +262,14 @@ winget settings --enable LocalManifestFiles
 winget install --manifest packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/0.2.0
 ```
 
-AUR (Arch Linux). The package is not published yet. After it is, install `snipset-cli` with your AUR helper. Until then, build it from `packaging/aur/snipset-cli`:
+AUR (Arch Linux, manifest only). The package is not published yet. After it is, install `snipset-cli` with your AUR helper. Until then, build it from `packaging/aur/snipset-cli`:
 
 ```sh
 cd packaging/aur/snipset-cli
 makepkg -si
 ```
 
-Homebrew (Linux only), from `Formula/snipset.rb` in this repo:
+Homebrew (Linux only, verified), from `Formula/snipset.rb` in this repo:
 
 ```sh
 brew tap belajarcarabelajar/snipset https://github.com/belajarcarabelajar/snipset-cli
@@ -229,19 +278,19 @@ brew install belajarcarabelajar/snipset/snipset
 
 The formula installs the prebuilt binary, which needs the host's `libcrypto.so.3` (OpenSSL 3) and glibc 2.34 or newer. The formula does not install them: the binary has no RPATH and Homebrew's `openssl@3` is keg-only, so depending on it would not change which library loads.
 
-Nix (x86_64-linux), from `flake.nix` in this repo:
+Nix (x86_64-linux, verified), from `flake.nix` in this repo:
 
 ```sh
 nix run github:belajarcarabelajar/snipset-cli
 ```
 
-The package is marked `unfree` because of the EULA in `LICENSE`. The flake imports nixpkgs with `allowUnfree = true` for its own package, so you do not change your Nix config for it. CI evaluates the flake with `nix flake check`; `nix run` has not been tried.
+The package is marked `unfree` because of the EULA in `LICENSE`. The flake imports nixpkgs with `allowUnfree = true` for its own package, so you do not change your Nix config for it. CI builds the package with `nix build .#default` and runs the built `snipset --version`; `nix run` itself is not exercised.
 
 Maintainers: every manifest above is rendered from `packaging/VERSION` and `packaging/SHA256SUMS` by `bun scripts/packaging/render.mjs`, and `--check` fails when a committed file differs. After changing the version, delete the previous version's folder under `packaging/winget/manifests` before running `--check`.
 
 ## Version managers
 
-These read the GitHub release directly and install the binary only.
+These are untested: no test runs these tools. They read the GitHub release directly and install the binary only.
 
 ```sh
 mise use -g github:belajarcarabelajar/snipset-cli@0.2.0
@@ -298,14 +347,32 @@ reason after its own two lines; close Snipset Desktop and retry.
 
 Before each command, the wrapper refreshes the snapshot when `--refresh` is
 passed, when the snapshot is missing, or when the live database or its `-wal`
-file is newer than the snapshot. Every refresh copies the whole live database,
-plus its `-wal` and `-shm` files when they exist, into the snapshot directory.
+file is newer than the snapshot.
 Use `--refresh` to force a fresh copy, `--live-db PATH` instead of
 `SNIPSET_LIVE_DB`, and `--snapshot-dir DIR` instead of
 `SNIPSET_LIVE_SNAPSHOT_DIR`. Pass `--` before the snipset command when args
 could look like wrapper flags. The wrapper owns `--db` (snapshot for reads,
 live for gated writes) and drops any user supplied `--db` or `--db=...`
 value; wrapper flags require a space and `--flag=value` is rejected.
+
+A refresh runs `snipset --db <live> backup --to <snap> --force` when
+`snipset backup --help` exits 0. `backup`, new in 0.3.0, copies the live
+database to the snapshot file with SQLite's online backup, which is safe while
+Snipset Desktop writes. If the backup fails, its error goes to stderr and the
+wrapper exits with the CLI's exit code; it does not fall back to copying files.
+With an older CLI, such as v0.2.0, `snipset backup --help` exits 2 for the
+unknown subcommand, and the wrapper prints this line on stderr and copies the
+whole live database, plus its `-wal` and `-shm` files when they exist, into the
+snapshot directory:
+
+```text
+snipset-live: this snipset has no backup command; copying files instead, which can be inconsistent while Snipset Desktop writes
+```
+
+Any other exit code from `snipset backup --help` stops a refresh: the wrapper
+prints one line on stderr naming that code and exits with it, without
+refreshing the snapshot or running your command. If `snipset` is not on `PATH`
+when a refresh is due, the wrapper says so and exits 127.
 
 ## Manual downloads
 

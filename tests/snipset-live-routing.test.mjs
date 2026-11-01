@@ -24,9 +24,11 @@ async function fixture({ doctorFail = false } = {}) {
   const snapDir = join(dir, "snap");
   const log = join(dir, "stub-argv.log");
   const stub = join(binDir, "snipset");
+  // Exit 2 on backup, like snipset 0.2.0, so a refresh takes the file-copy path and the probe stays out of the log.
   await writeFile(
     stub,
     `#!/bin/sh
+[ "$1" = backup ] && exit 2
 printf '%s\\n' "$*" >> "${log}"
 case " $* " in
   *" doctor "*)

@@ -431,10 +431,10 @@ async function probeRun({ env, installDir, release }, code) {
   return out.at(-1);
 }
 
-test("missing DLL: a smoke exit code of -1073741515 names the two DLLs and leaves the old exe in place", { skip: zipSkip, timeout: 60000 }, async () => {
+test("missing DLL: a smoke exit code of -1073741515 reports STATUS_DLL_NOT_FOUND and leaves the old exe in place", { skip: zipSkip, timeout: 60000 }, async () => {
   await withWorkspace(async (ws) => {
     const last = await probeRun(ws, -1073741515);
-    assert.equal(last, "error: install.ps1: snipset.exe could not start: it needs libcrypto-3-x64.dll and VCRUNTIME140.dll, which this release does not ship; see the README Windows notes");
+    assert.equal(last, "error: install.ps1: snipset.exe could not start because Windows could not load a DLL it needs (STATUS_DLL_NOT_FOUND); see the README Windows notes");
   });
 });
 

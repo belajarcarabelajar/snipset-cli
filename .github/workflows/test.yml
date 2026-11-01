@@ -154,9 +154,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - name: nix flake check
+      # Leaves the out-link ./result, whose bin/snipset the next step runs.
+      - name: nix build
+        run: nix build .#default
+      - name: nix flake check and the built snipset --version
         env:
           SNIPSET_NIX_CHECK: "1"
+          SNIPSET_NIX_BUILD: "1"
         run: bun test tests/packaging-nix.test.mjs
 
   homebrew:

@@ -23,6 +23,7 @@ const cells = (row) => row.split("|").slice(1, -1).map((cell) => cell.trim());
 describe("README install coverage", () => {
   test("sections appear in the documented order", () => {
     const order = [
+      "What it does",
       "Install matrix",
       "Linux x64",
       "Check, update, uninstall, dry run",
@@ -63,29 +64,6 @@ describe("README install coverage", () => {
     const rows = tableRows(readme);
     const missing = params.filter((name) => !rows.some((row) => row.includes("`-" + name)));
     expect(missing).toEqual([]);
-  });
-
-  test("the install matrix has one row per channel with its status", () => {
-    const expected = [
-      ["`install.sh` on Arch Linux x86_64", "verified"],
-      ["`install.sh` on Debian, Ubuntu, Fedora, WSL", "not verified"],
-      ["`install.sh --from` (offline)", "verified"],
-      ["`install.ps1` on Windows x64", "verified"],
-      ["Scoop", "not verified"],
-      ["winget", "not submitted"],
-      ["AUR", "not published"],
-      ["Homebrew tap", "verified"],
-      ["Nix flake", "not verified"],
-      ["mise, eget, ubi", "not verified"],
-      ["`gh release download`", "verified"],
-    ];
-    const rows = tableRows(section("Install matrix")).slice(2).map(cells);
-    expect(rows.map((row) => row[0])).toEqual(expected.map(([channel]) => channel));
-    for (const [index, [channel, status]] of expected.entries()) {
-      const text = rows[index][1];
-      expect({ channel, status: text.match(/^(verified|not verified|not submitted|not published)\b/)?.[1] }).toEqual({ channel, status });
-      expect({ channel, reason: /^(verified|not verified|not submitted|not published)( on Windows)?: \S/.test(text) }).toEqual({ channel, reason: true });
-    }
   });
 
   // v0.2.0 was published on 2026-10-25, so no channel waits on a Draft any more.
@@ -166,26 +144,153 @@ describe("README install coverage", () => {
     expect(firstAt).toBeGreaterThanOrEqual(0);
     expect(readme.indexOf(last, firstAt)).toBeGreaterThan(firstAt);
     const body = section("Querying the live database (companion workflow)");
-    expect(createHash("sha256").update(body).digest("hex")).toBe("e09eca78e0f4ff7d460379a7d67da33f5c5ff13fbd99a8cb0d8639c3783b5638");
+    expect(createHash("sha256").update(body).digest("hex")).toBe("96f1140ae424e44bdfd8f8e28ff23bae3496fc52b630ba3632a756da24c34185");
   });
 });
 
-describe("opencode command docs", () => {
-  test("check-wiring expects the env source line from --add-path", () => {
-    const text = read(".opencode/commands/check-wiring.md");
-    expect(text).toContain('. "<share>/env"');
-    expect(text).not.toContain('exactly one `export PATH="<install-dir>:$PATH"` line');
+// The CLI source is private, so the groups are pinned from `enum Command` in
+// Snipset's crates/snipset-cli/src/cli.rs at version 0.3.0, in help order.
+const COMMAND_GROUPS = [
+  "doctor", "init", "snippet", "group", "clipboard", "audio", "journal", "task", "note",
+  "pomodoro", "stats", "reference", "support", "settings", "import", "export", "backup", "mcp",
+];
+const LABELS = /^(verified|manifest only|untested): \S/;
+const BACKUP_FALLBACK =
+  "snipset-live: this snipset has no backup command; copying files instead, which can be inconsistent while Snipset Desktop writes";
+
+function fencedLines(text) {
+  const lines = [];
+  let inside = false;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("```")) inside = !inside;
+    else if (inside) lines.push(line);
+  }
+  return lines;
+}
+
+describe("README what it does", () => {
+  test("what it does: one row per command group of snipset --help, in help order", () => {
+    const rows = tableRows(section("What it does")).slice(2).map(cells);
+    expect(rows.map((row) => row[0])).toEqual(COMMAND_GROUPS.map((name) => "`" + name + "`"));
+    expect(rows.filter((row) => !(row[1]?.length > 0)).map((row) => row[0])).toEqual([]);
+    expect(rows.find((row) => row[0] === "`backup`")?.[1]).toContain("new in 0.3.0");
   });
 
-  test("verify runs both generator checks", () => {
-    const text = read(".opencode/commands/verify.md");
-    expect(text).toContain("bun scripts/installer/build.mjs --check");
-    expect(text).toContain("bun scripts/packaging/render.mjs --check");
+  test("what it does: names the MCP server and points at its registration", () => {
+    const text = section("What it does");
+    expect(text).toContain("`snipset mcp`");
+    expect(text).toContain("Model Context Protocol");
+    expect(text).toContain("[MCP registration](#mcp-registration)");
+  });
+
+  test("what it does: the four quick examples sit in code blocks", () => {
+    const lines = fencedLines(section("What it does"));
+    const examples = [
+      `bash install-snipset.sh --version v${version} --add-path --with-mcp=claude`,
+      "snipset init",
+      'snipset snippet search "git status"',
+      "snipset --json stats overview",
+    ];
+    expect(examples.filter((example) => !lines.includes(example))).toEqual([]);
+    // snipset init refuses an existing database, and a fresh install.sh run already made one.
+    expect(section("What it does")).toContain("`--no-init`");
+    expect(section("What it does")).toContain("`--force`");
+  });
+
+  test("what it does: the installer example uses flags and an MCP id that install.sh --help prints", () => {
+    const help = spawnSync("bash", [join(repo, "install.sh"), "--help"], { encoding: "utf8" });
+    expect(help.status).toBe(0);
+    const example = fencedLines(section("What it does")).find((line) => line.startsWith("bash install-snipset.sh "));
+    expect(example).toBeDefined();
+    const flags = example.match(/--[a-z-]+/g);
+    expect(flags.filter((flag) => !help.stdout.includes(` ${flag} `))).toEqual([]);
+    const listLine = help.stdout.split("\n").find((line) => line.trimStart().startsWith("--with-mcp=LIST"));
+    expect(listLine).toMatch(/\bclaude\b/);
+    expect(example).toContain("--with-mcp=claude");
+  });
+
+  test("what it does: the install matrix labels each channel verified, manifest only, or untested", () => {
+    const expected = [
+      ["`install.sh` on Arch Linux x86_64", "verified"],
+      ["`install.sh` on Ubuntu", "verified"],
+      ["`install.sh` on Debian, Fedora, WSL", "untested"],
+      ["`install.sh --from` (offline)", "verified"],
+      ["`install.ps1` on Windows x64", "verified"],
+      ["Scoop", "manifest only"],
+      ["winget", "manifest only"],
+      ["AUR", "manifest only"],
+      ["Homebrew tap", "verified"],
+      ["Nix flake", "verified"],
+      ["mise, eget, ubi", "untested"],
+      ["`gh release download`", "verified"],
+    ];
+    const text = section("Install matrix");
+    const rows = tableRows(text).slice(2).map(cells);
+    expect(rows.map((row) => row[0])).toEqual(expected.map(([channel]) => channel));
+    for (const [index, [channel, label]] of expected.entries()) {
+      const status = rows[index][1];
+      expect({ channel, label: status.match(LABELS)?.[1] }).toEqual({ channel, label });
+    }
+    for (const label of ["verified means", "manifest only means", "untested means"]) {
+      expect({ label, defined: text.includes(label) }).toEqual({ label, defined: true });
+    }
+  });
+
+  test("what it does: each channel section carries its label", () => {
+    const intros = [
+      ["Linux x64", "`install.sh` is ", ["verified on Arch Linux and Ubuntu", "untested on Debian, Fedora, and WSL"]],
+      ["Offline install", "`--from DIR` ", ["(verified)", "`gh release download` (verified)"]],
+      ["Windows x64", "`install.ps1` is ", ["verified"]],
+      ["Package managers", "Scoop (", ["(Windows, manifest only)"]],
+      ["Package managers", "winget (", ["(Windows, manifest only)"]],
+      ["Package managers", "AUR (", ["(Arch Linux, manifest only)"]],
+      ["Package managers", "Homebrew (", ["(Linux only, verified)"]],
+      ["Package managers", "Nix (", ["(x86_64-linux, verified)"]],
+      ["Version managers", "These ", ["untested"]],
+    ];
+    for (const [heading, prefix, phrases] of intros) {
+      const line = section(heading).split("\n").find((entry) => entry.startsWith(prefix)) ?? "";
+      expect({ heading, prefix, missing: phrases.filter((phrase) => !line.includes(phrase)) }).toEqual({ heading, prefix, missing: [] });
+    }
+  });
+
+  test("what it does: the wrapper refreshes through snipset backup and prints its fallback line", () => {
+    const text = section("Querying the live database (companion workflow)");
+    expect(text).toContain("`snipset --db <live> backup --to <snap> --force`");
+    expect(text).toContain("`snipset backup --help`");
+    expect(fencedLines(text)).toContain(BACKUP_FALLBACK);
+  });
+
+  test("what it does: the wrapper text matches scripts/snipset-live.sh, a failed backup included", () => {
+    const wrapper = read("scripts/snipset-live.sh");
+    expect(wrapper).toContain('snipset --db "$live" backup --to "$snap" --force');
+    expect(wrapper).toContain(BACKUP_FALLBACK);
+    const prose = section("Querying the live database (companion workflow)").replace(/\s+/g, " ");
+    expect(prose).toContain("the wrapper exits with the CLI's exit code; it does not fall back to copying files");
+  });
+
+  test("what it does: the Windows notes quote the message install.ps1 throws when a DLL is missing", () => {
+    const message = read("scripts/installer/ps1/binary.ps1").match(/throw '(install\.ps1: snipset\.exe could not start because [^']+)'/)?.[1];
+    expect(message).toBeDefined();
+    const text = section("Windows x64");
+    expect(text).toContain("`" + message + "`");
+    expect(text).not.toContain("a message naming them");
+  });
+
+  test("what it does: the Nix label rests on the CI nix build, not on nix run", () => {
+    const nixJob = read(".github/workflows/test.yml").match(/\n  nix:\n([\s\S]*?)(?=\n  [a-z][\w-]*:\n|$)/)?.[1] ?? "";
+    expect(nixJob).toContain("run: nix build .#default");
+    expect(nixJob).toContain('SNIPSET_NIX_BUILD: "1"');
+    const row = tableRows(section("Install matrix")).find((line) => cells(line)[0] === "Nix flake");
+    expect(row).toContain("`nix build .#default`");
+    const text = section("Package managers");
+    expect(text).toContain("CI builds the package with `nix build .#default`");
+    expect(text).toContain("`nix run` itself is not exercised");
   });
 });
 
 describe("no em dash", () => {
-  for (const path of ["README.md", ".opencode/commands/check-wiring.md", ".opencode/commands/verify.md"]) {
+  for (const path of ["README.md"]) {
     test(path, () => {
       expect(read(path).includes(EM_DASH)).toBe(false);
     });

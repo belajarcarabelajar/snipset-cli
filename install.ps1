@@ -328,7 +328,7 @@ function Install-SnipsetBinary {
     if (-not (Test-SnipsetBinary -Path $candidate)) {
       # 0xC0000135, STATUS_DLL_NOT_FOUND: the loader stopped before snipset.exe ran.
       if (($run -is [hashtable]) -and $run.probe -and ($run.probe.ExitCode -eq -1073741515)) {
-        throw 'install.ps1: snipset.exe could not start: it needs libcrypto-3-x64.dll and VCRUNTIME140.dll, which this release does not ship; see the README Windows notes'
+        throw 'install.ps1: snipset.exe could not start because Windows could not load a DLL it needs (STATUS_DLL_NOT_FOUND); see the README Windows notes'
       }
       throw 'install.ps1: the downloaded snipset.exe failed "snipset.exe --version"; the installed snipset.exe was not changed'
     }

@@ -7,3 +7,11 @@ graphify-out/
 !.env.example
 .dev.vars
 .dev.vars.*
+
+# Planning and agent files live outside the public repository; their history up
+# to 0466bc0 is archived in Snipset under docs/code-plan/snipset-cli-archive.
+/docs/code-plan/
+/docs/verification/
+/MEMORY.md
+/.opencode/
+/opencode.json

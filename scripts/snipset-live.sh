@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # snipset-live: run snipset CLI against a snapshot of the live Desktop database.
-# Reads hit the snapshot (no lock contention; recopied only if missing, forced, or older than the live db or its -wal).
+# Reads hit the snapshot (no lock contention; refreshed only if missing, forced, or older than the live db or its -wal,
+# through `snipset backup` when this snipset has it, else by a plain file copy).
 # Writes go to the live database, but only after `snipset doctor` proves it
 # is reachable; otherwise the write is refused so a locked live file is
 # never touched from behind the running app.
@@ -41,10 +42,34 @@ snap="$snap_dir/snipset.db"
 # Refresh when forced, missing, or older than the live database or its -wal;
 # WAL-mode commits land in -wal and leave the main file mtime unchanged.
 if ((refresh)) || [[ ! -f "$snap" ]] || [[ "$live" -nt "$snap" ]] || [[ "$live-wal" -nt "$snap" ]]; then
-  cp -f "$live" "$snap"
-  for ext in -wal -shm; do
-    if [[ -f "$live$ext" ]]; then cp -f "$live$ext" "$snap$ext"; else rm -f "$snap$ext"; fi
-  done
+  if ! command -v snipset >/dev/null; then
+    echo 'snipset-live: snipset is not on PATH' >&2
+    exit 127
+  fi
+  # Copying the main file, -wal and -shm one after another can pair pages from
+  # two moments while Snipset Desktop writes. backup copies one committed state,
+  # and --force also drops the snapshot's stale -wal and -shm.
+  # Only exit 2, clap's answer to an unknown subcommand (as in 0.2.0), means no
+  # backup command; a loader failure or a killed probe must not take the copy.
+  probe=0
+  snipset backup --help >/dev/null 2>&1 || probe=$?
+  case "$probe" in
+    0)
+      # Its report would otherwise land ahead of the wrapped command's stdout.
+      snipset --db "$live" backup --to "$snap" --force >/dev/null
+      ;;
+    2)
+      echo 'snipset-live: this snipset has no backup command; copying files instead, which can be inconsistent while Snipset Desktop writes' >&2
+      cp -f "$live" "$snap"
+      for ext in -wal -shm; do
+        if [[ -f "$live$ext" ]]; then cp -f "$live$ext" "$snap$ext"; else rm -f "$snap$ext"; fi
+      done
+      ;;
+    *)
+      echo "snipset-live: snipset backup --help exited $probe; stopping without refreshing the snapshot" >&2
+      exit "$probe"
+      ;;
+  esac
 fi
 cmd=""
 sub=""
