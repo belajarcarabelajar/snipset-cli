@@ -10,14 +10,15 @@ const RENDER = join(repo, "scripts", "packaging", "render.mjs");
 const SCHEMA_LITE = join(repo, "tests", "helpers", "schema-lite.mjs");
 const FIXTURES = join(repo, "tests", "fixtures", "packaging");
 
-const VERSION = "0.2.0";
-const LINUX_ASSET = "snipset-cli-v0.2.0-x86_64-unknown-linux-gnu.tar.gz";
-const WINDOWS_ASSET = "snipset-cli-v0.2.0-x86_64-pc-windows-msvc.zip";
-const LINUX_SHA = "57b43b6ee0b55fc690cac8851d2c5009eefdc10e538fb5683bc294cf8c78cfe5";
-const WINDOWS_SHA = "90d888f74edb2d6711adee445b5ba25fe85ab3e374bfb341d946aaf18a80edcc";
-const DOWNLOAD = "https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.2.0/";
+const VERSION = "0.3.0";
+const LINUX_ASSET = "snipset-cli-v0.3.0-x86_64-unknown-linux-gnu.tar.gz";
+const WINDOWS_ASSET = "snipset-cli-v0.3.0-x86_64-pc-windows-msvc.zip";
+// The digests in the v0.3.0 release's SHA256SUMS, rechecked with sha256sum on both assets.
+const LINUX_SHA = "79a18aa09518dac05fb90cd3babe38de7b292e8f4dbd3ac6715295aa37f6fc70";
+const WINDOWS_SHA = "5531ca268ba8d232eabfd4f9f06313b0bc465682406174606c15598df6e67e3e";
+const DOWNLOAD = "https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.3.0/";
 const OUT_PLAIN = "out/demo/demo.txt";
-const OUT_VERSIONED = "out/demo/0.2.0/demo-0.2.0.txt";
+const OUT_VERSIONED = "out/demo/0.3.0/demo-0.3.0.txt";
 
 const sri = (hex) => `sha256-${Buffer.from(hex, "hex").toString("base64")}`;
 
@@ -220,11 +221,12 @@ describe("render.mjs functions", () => {
     );
   });
 
-  test("the committed packaging files hold version 0.2.0 and its two digests", async () => {
+  test("the committed packaging files hold version 0.3.0 and the release's SHA256SUMS byte for byte", async () => {
     const { parseSums } = await import(RENDER);
-    expect(readFileSync(join(repo, "packaging", "VERSION"), "utf8")).toBe("0.2.0\n");
+    expect(readFileSync(join(repo, "packaging", "VERSION"), "utf8")).toBe("0.3.0\n");
     const text = readFileSync(join(repo, "packaging", "SHA256SUMS"), "utf8");
-    expect(text).toBe(`${LINUX_SHA}  ${LINUX_ASSET}\n${WINDOWS_SHA}  ${WINDOWS_ASSET}\n`);
+    // The v0.3.0 release lists the zip first, and install-real-assets.test.mjs wants this copy byte-equal to it.
+    expect(text).toBe(`${WINDOWS_SHA}  ${WINDOWS_ASSET}\n${LINUX_SHA}  ${LINUX_ASSET}\n`);
     expect(parseSums(text, VERSION)).toEqual({ linux: LINUX_SHA, windows: WINDOWS_SHA });
   });
 

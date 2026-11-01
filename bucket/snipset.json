@@ -1,5 +1,5 @@
 {
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "Terminal companion for the Snipset snippet manager",
     "homepage": "https://github.com/belajarcarabelajar/snipset-cli",
     "license": {
@@ -8,8 +8,8 @@
     },
     "architecture": {
         "64bit": {
-            "url": "https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.2.0/snipset-cli-v0.2.0-x86_64-pc-windows-msvc.zip",
-            "hash": "90d888f74edb2d6711adee445b5ba25fe85ab3e374bfb341d946aaf18a80edcc"
+            "url": "https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.3.0/snipset-cli-v0.3.0-x86_64-pc-windows-msvc.zip",
+            "hash": "5531ca268ba8d232eabfd4f9f06313b0bc465682406174606c15598df6e67e3e"
         }
     },
     "bin": "snipset.exe",

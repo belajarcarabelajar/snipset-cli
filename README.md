@@ -1,6 +1,6 @@
 # Snipset CLI
 
-Install the `snipset` terminal companion on Linux x64 or Windows x64 from release assets. This repository holds the installers, the package manifests, and the release documentation. The CLI source and the native builds are private.
+Install the `snipset` terminal companion on Linux x64 or Windows x64 from release assets. This repository holds the installers, the package manifests, and the release documentation. The CLI source and the native builds are private. The CLI is free to use under section 7 of the Snipset EULA in [`LICENSE`](LICENSE): the license fee and the device limit do not apply to it, and every other term of the EULA does.
 
 ## What it does
 
@@ -34,7 +34,7 @@ Install the `snipset` terminal companion on Linux x64 or Windows x64 from releas
 Install a pinned release with the downloaded installer (see [Linux x64](#linux-x64)), add it to PATH, and register the MCP server with Claude Code:
 
 ```sh
-bash install-snipset.sh --version v0.2.0 --add-path --with-mcp=claude
+bash install-snipset.sh --version v0.3.0 --add-path --with-mcp=claude
 ```
 
 Create a standalone database. A fresh `install.sh` run already creates one unless you pass `--no-init`; `install.ps1` and the package managers do not. `snipset init` refuses to replace an existing database unless you pass `--force`.
@@ -56,12 +56,12 @@ Status on 2026-11-01. CI (`.github/workflows/test.yml`) runs every check named b
 
 | Channel | Status |
 | --- | --- |
-| `install.sh` on Arch Linux x86_64 | verified: the sandboxed installer suites (`tests/install*.test.mjs`) plus an install of the real v0.2.0 assets in a temp HOME (`tests/install-real-assets.test.mjs`) |
+| `install.sh` on Arch Linux x86_64 | verified: the sandboxed installer suites (`tests/install*.test.mjs`) plus an install of the real v0.3.0 assets in a temp HOME (`tests/install-real-assets.test.mjs`) |
 | `install.sh` on Ubuntu | verified: CI on `ubuntu-latest` runs the installer suites plus `tests/install-real-assets.test.mjs` |
 | `install.sh` on Debian, Fedora, WSL | untested: no run covers them; glibc 2.34 and OpenSSL 3 are required |
 | `install.sh --from` (offline) | verified: the same runs as `install.sh` on Arch Linux and Ubuntu |
-| `install.ps1` on Windows x64 | verified: CI on `windows-latest` downloads and installs the published v0.2.0 zip under PowerShell 7 and Windows PowerShell 5.1, then runs `-Check`, `snipset --version`, and `-Uninstall`; the runner image has both DLLs the v0.2.0 exe imports (it starts there), so this run cannot catch their absence on a clean Windows (see [Windows x64](#windows-x64)) |
-| Scoop | manifest only: the manifest passes the vendored Scoop schema; no CI job installs it yet |
+| `install.ps1` on Windows x64 | verified: CI on `windows-latest` downloads and installs the published v0.3.0 zip under PowerShell 7 and Windows PowerShell 5.1, then runs `-Check`, `snipset --version`, and `-Uninstall`; the job first deletes the OpenSSL DLLs the runner image keeps in System32 and limits PATH to System32, Windows and the install dir, and the previous release, whose exe needs those DLLs, must fail there with STATUS_DLL_NOT_FOUND (see [Windows x64](#windows-x64)) |
+| Scoop | verified: CI on `windows-latest` installs `bucket/snipset.json` and runs `snipset --version` with only System32, Windows and the Scoop shims on PATH |
 | winget | manifest only: not submitted; the manifests pass the vendored 1.12.0 schemas |
 | AUR | manifest only: not published; the package builds with makepkg on Arch from the real tarball, and its binary runs |
 | Homebrew tap | verified: CI on `ubuntu-latest` installs the formula from a local tap, downloading the published tarball, then runs `brew test` and `brew audit --strict`; `brew tap` from this repo is not exercised |
@@ -74,9 +74,9 @@ Status on 2026-11-01. CI (`.github/workflows/test.yml`) runs every check named b
 `install.sh` is verified on Arch Linux and Ubuntu and untested on Debian, Fedora, and WSL (see [Install matrix](#install-matrix)). Download the installer, read it, then install a pinned release.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.sh -o install-snipset.sh
+curl -fsSL https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.3.0/install.sh -o install-snipset.sh
 less install-snipset.sh
-bash install-snipset.sh --version v0.2.0 --add-path
+bash install-snipset.sh --version v0.3.0 --add-path
 ```
 
 The copy on `main` works too. It gets installer fixes before the next tag:
@@ -92,8 +92,8 @@ The default destination is `~/.local/bin`. The installer checks the archive agai
 A fresh install also sets up a working station. It creates a standalone database (`snipset init`), installs the shell bundle (helpers, completion, TAB expansion, Enter trigger) with a marked block in `~/.bashrc`, and generates trigger shims next to the binary. Each step can run again without harm, and each one can be turned off:
 
 ```sh
-bash install-snipset.sh --version v0.2.0 --add-path --with-mcp=claude,opencode
-bash install-snipset.sh --version v0.2.0 --no-init --no-shell --no-shims
+bash install-snipset.sh --version v0.3.0 --add-path --with-mcp=claude,opencode
+bash install-snipset.sh --version v0.3.0 --no-init --no-shell --no-shims
 ```
 
 Releases without the shell bundle ship the binary only. The installer then skips shell integration and shims with a note and still exits 0; the database, PATH, and MCP steps still run.
@@ -157,7 +157,7 @@ bash install-snipset.sh --uninstall --add-path --with-mcp=claude,opencode
 `--from DIR` (verified) installs from a directory that holds `SHA256SUMS` and the Linux archive. Nothing is downloaded, and the checksum is still checked. Without `--version` the installer reads the version from the files in DIR. `gh release download` (verified) fills such a directory:
 
 ```sh
-gh release download v0.2.0 -R belajarcarabelajar/snipset-cli -D snipset-assets
+gh release download v0.3.0 -R belajarcarabelajar/snipset-cli -D snipset-assets
 bash install-snipset.sh --from snipset-assets --add-path
 ```
 
@@ -205,14 +205,14 @@ Older installers wrote `export PATH="<install-dir>:$PATH"` into `~/.profile`. Th
 `install.ps1` is verified on Windows x64 (see [Install matrix](#install-matrix)). Run PowerShell without administrator rights:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.2.0/install.ps1).Content)) -Version v0.2.0 -AddPath
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/v0.3.0/install.ps1).Content)) -Version v0.3.0 -AddPath
 ```
 
 The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script and read it first when your policy requires it. The script sets TLS 1.2 for GitHub downloads. It ships the binary only; shell integration is a Linux feature.
 
 | Parameter | Effect |
 | --- | --- |
-| `-Version` | Release to install, for example `v0.2.0`. Default: the latest release. |
+| `-Version` | Release to install, for example `v0.3.0`. Default: the latest release. |
 | `-InstallDir` | Directory for `snipset.exe`. Default: `$env:LOCALAPPDATA\Snipset\bin`. |
 | `-AddPath` | Add the install dir to the User `Path`. |
 | `-WithMcp` | Register MCP for `claude`, `codex`, `gemini`, `opencode`, `cursor`, `vscode`, or `all`. One comma string or several strings. |
@@ -227,7 +227,7 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 .\install.ps1 -Check -AddPath -WithMcp claude,codex
 .\install.ps1 -Update
 .\install.ps1 -Uninstall -WithMcp claude,codex
-.\install.ps1 -Version v0.2.0 -From .\snipset-assets
+.\install.ps1 -Version v0.3.0 -From .\snipset-assets
 ```
 
 - Use only one of `-Check`, `-Update`, `-Uninstall`. `-DryRun -Uninstall` is refused; run `-Check` instead.
@@ -235,14 +235,15 @@ The default destination is `$env:LOCALAPPDATA\Snipset\bin`. Download the script 
 - User `Path`: the script reads and writes the raw value in `HKCU\Environment`, so entries such as `%USERPROFILE%\bin` stay unexpanded. It then tells Windows that the environment changed. Open a new terminal to use `snipset`.
 - `-Check` looks at the User `Path` only when you pass `-AddPath`. Pass the same `-InstallDir`, `-WithMcp`, and `-Database` as the install.
 - Parameters are named only; a positional value, such as a stray `-Db x`, is refused before anything is written.
-- The v0.2.0 `snipset.exe` imports `libcrypto-3-x64.dll` (OpenSSL 3) and `VCRUNTIME140.dll` (the Microsoft Visual C++ runtime), and the zip ships neither. This was read from the import table with `objdump -p`, not run on Windows. Without both on the DLL search path the exe cannot start: the installer stops with `install.ps1: snipset.exe could not start because Windows could not load a DLL it needs (STATUS_DLL_NOT_FOUND); see the README Windows notes`, and the installed `snipset.exe` stays as it was.
+- From v0.3.0, `snipset.exe` is static: its import table, read with `objdump -p`, names only DLLs that ship with Windows, so it needs no OpenSSL or Visual C++ runtime DLLs.
+- v0.2.0 needed `libcrypto-3-x64.dll` (OpenSSL 3) and `VCRUNTIME140.dll` (the Visual C++ runtime), which its zip did not ship. Without them it cannot start: the installer stops with `install.ps1: snipset.exe could not start because Windows could not load a DLL it needs (STATUS_DLL_NOT_FOUND); see the README Windows notes`, and the installed `snipset.exe` stays as it was.
 - An update over a `snipset.exe` that is in use renames it to `snipset.exe.old-<pid>-<8 hex>`. The next install, update, or uninstall deletes those files once the program using them has exited.
 
 ## Package managers
 
 These install the binary only, plus on Linux the shims generator and bash completion (AUR and Homebrew also install `snipset.sh` and `tab.sh`). None of them runs the setup steps of `install.sh`.
 
-Scoop (Windows, manifest only), from the `bucket/snipset.json` manifest in this repo. No CI job installs it yet:
+Scoop (Windows, verified), from the `bucket/snipset.json` manifest in this repo. CI installs it on every run:
 
 ```powershell
 scoop bucket add snipset https://github.com/belajarcarabelajar/snipset-cli
@@ -259,7 +260,7 @@ To test the manifests from a clone, enable local manifests once from an administ
 
 ```powershell
 winget settings --enable LocalManifestFiles
-winget install --manifest packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/0.2.0
+winget install --manifest packaging/winget/manifests/b/BCBAcademy/SnipsetCLI/0.3.0
 ```
 
 AUR (Arch Linux, manifest only). The package is not published yet. After it is, install `snipset-cli` with your AUR helper. Until then, build it from `packaging/aur/snipset-cli`:
@@ -293,9 +294,9 @@ Maintainers: every manifest above is rendered from `packaging/VERSION` and `pack
 These are untested: no test runs these tools. They read the GitHub release directly and install the binary only.
 
 ```sh
-mise use -g github:belajarcarabelajar/snipset-cli@0.2.0
-eget belajarcarabelajar/snipset-cli --tag v0.2.0 --file snipset --to ~/.local/bin
-ubi -p belajarcarabelajar/snipset-cli -t v0.2.0 -e snipset -i ~/.local/bin
+mise use -g github:belajarcarabelajar/snipset-cli@0.3.0
+eget belajarcarabelajar/snipset-cli --tag v0.3.0 --file snipset --to ~/.local/bin
+ubi -p belajarcarabelajar/snipset-cli -t v0.3.0 -e snipset -i ~/.local/bin
 ```
 
 mise checks the asset with the digest GitHub publishes. eget checks a checksum automatically only from a `<asset>.sha256` file, which this release does not have. ubi documents no checksum check. Compare with `SHA256SUMS` by hand when you use eget or ubi.
@@ -334,7 +335,7 @@ every `stats` command, `reference list`, `clipboard list/get/search/export`,
 `audio tts list`, `audio stats`, `journal list/get/export`,
 `task list/get/subtasks/stats`, `task project list`, `task folder list`,
 `note list/get/search/count/stats`, `settings list/get/export`,
-`support categories`, and `export`. `--version`, `-V`, `help`, and
+`support categories`, `export`, and `backup` (it copies the snapshot, not the live file). `--version`, `-V`, `help`, and
 `<command> --help` also skip the write check, because they never open the
 database. `pomodoro` and `doctor` go through the write path. Reads use the snapshot in
 `$SNIPSET_LIVE_SNAPSHOT_DIR` (default `${TMPDIR:-/tmp}/snipset-live-<uid>`,
@@ -378,9 +379,9 @@ when a refresh is due, the wrapper says so and exits 127.
 
 Download the archive for your platform and `SHA256SUMS` from the release page. Check the archive against its line in `SHA256SUMS`, then extract it only into a directory you own.
 
-The Linux asset `snipset-cli-v0.2.0-x86_64-unknown-linux-gnu.tar.gz` holds the `snipset` executable, `LICENSE`, and the `shell/` bundle (`snipset.sh`, `completion.bash`, `tab.sh`, `snipset-shims.sh`).
+The Linux asset `snipset-cli-v0.3.0-x86_64-unknown-linux-gnu.tar.gz` holds the `snipset` executable, `LICENSE`, `THIRD-PARTY-NOTICES.txt` (the license texts of the components built into the binary), and the `shell/` bundle (`snipset.sh`, `completion.bash`, `tab.sh`, `snipset-shims.sh`).
 
-The Windows asset `snipset-cli-v0.2.0-x86_64-pc-windows-msvc.zip` holds `snipset.exe` and `LICENSE`.
+The Windows asset `snipset-cli-v0.3.0-x86_64-pc-windows-msvc.zip` holds `snipset.exe`, `LICENSE`, and `THIRD-PARTY-NOTICES.txt`.
 
 The CLI works against a standalone database created by `snipset init`, or against an existing compatible database created by Snipset Desktop. It never migrates a schema it does not own. Clipboard, journal, pomodoro, note, and task operations that use the live bridge need the desktop app to be running. Database-only operations work while the app is closed.
 
@@ -394,7 +395,6 @@ The CLI works against a standalone database created by `snipset init`, or agains
 - `--check` or `--uninstall` with `--with-mcp=claude` runs `claude mcp get`, which updates Claude's own state files.
 - The output formats of `codex`, `gemini`, and VS Code were not observed, and the Windows config paths for Cursor, Codex, and Gemini are inferred.
 - Uninstall removes only the empty directories the install created. A directory that existed before the install, still holds a file, or was made by an older installer stays; on Windows the empty install dir is removed.
-- The Windows v0.2.0 exe needs `libcrypto-3-x64.dll` and `VCRUNTIME140.dll`, which the zip does not ship.
 - The Homebrew formula relies on the host's `libcrypto.so.3` (OpenSSL 3) and glibc 2.34 or newer.
 - `--check` needs the same flags as the install.
 - The EULA in `LICENSE` applies to every channel.

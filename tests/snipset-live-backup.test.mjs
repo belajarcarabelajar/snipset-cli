@@ -250,3 +250,16 @@ test("without snipset on PATH, a refresh exits 127 with one line and copies noth
     await rm(fx.dir, { recursive: true, force: true });
   }
 });
+
+test("a user backup command copies the snapshot without the doctor gate", async () => {
+  const fx = await fixture({ backup: "works" });
+  try {
+    await primeFreshSnapshot(fx);
+    const out = join(fx.dir, "user-copy.db");
+    await run("bash", [script, "backup", "--to", out, "--force"], { env: fx.env });
+    assert.deepEqual(await loggedLines(fx.log), [`--db ${fx.snapDb} backup --to ${out} --force`]);
+    assert.equal(await readFile(out, "utf8"), "backup-of:fresh-snapshot");
+  } finally {
+    await rm(fx.dir, { recursive: true, force: true });
+  }
+});

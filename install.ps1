@@ -44,9 +44,9 @@ Install the requested or latest release over the current one. Cannot be combined
 Remove what the installer added. Cannot be combined with -Check or -Update.
 
 .EXAMPLE
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/main/install.ps1).Content)) -Version v0.2.0 -AddPath
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/belajarcarabelajar/snipset-cli/main/install.ps1).Content)) -Version v0.3.0 -AddPath
 
-Installs v0.2.0 into $env:LOCALAPPDATA\Snipset\bin and adds that directory to the user PATH.
+Installs v0.3.0 into $env:LOCALAPPDATA\Snipset\bin and adds that directory to the user PATH.
 
 .EXAMPLE
 .\install.ps1 -Version v0.1.0 -WithMcp claude,codex -DryRun

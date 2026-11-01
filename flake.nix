@@ -11,10 +11,10 @@
       };
       snipset = pkgs.stdenv.mkDerivation {
         pname = "snipset-cli";
-        version = "0.2.0";
+        version = "0.3.0";
         src = pkgs.fetchurl {
-          url = "https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.2.0/snipset-cli-v0.2.0-x86_64-unknown-linux-gnu.tar.gz";
-          hash = "sha256-V7Q7buC1X8aQysiFHSxQCe79wQ5Tj7VoO8KUz4x4z+U=";
+          url = "https://github.com/belajarcarabelajar/snipset-cli/releases/download/v0.3.0/snipset-cli-v0.3.0-x86_64-unknown-linux-gnu.tar.gz";
+          hash = "sha256-eaGKoJUY2sBfuQzTur443nspLo9NvTrGcVKVqjf2/HA=";
         };
         # The tarball holds the binary at its root and one directory, shell/, which unpack would enter.
         sourceRoot = ".";
