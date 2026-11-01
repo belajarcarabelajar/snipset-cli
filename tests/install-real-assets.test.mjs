@@ -40,6 +40,15 @@ describe.skipIf(!assets)("real release assets", () => {
     for (const name of [linuxAsset, windowsAsset]) expect(sums).toContain(`${sha256(join(assets, name))}  ${name}`);
   });
 
+  // Every channel installs these two files from the archive root; SQLCipher's BSD license requires its notice.
+  test("both archives carry LICENSE and THIRD-PARTY-NOTICES.txt at their root", () => {
+    for (const name of [linuxAsset, windowsAsset]) {
+      const list = spawnSync("/usr/bin/bsdtar", ["-tf", join(assets, name)], { encoding: "utf8" });
+      expect(list.status).toBe(0);
+      expect(list.stdout.split("\n")).toEqual(expect.arrayContaining(["LICENSE", "THIRD-PARTY-NOTICES.txt"]));
+    }
+  });
+
   test("install.sh --from installs, checks, and uninstalls the real binary in a sandbox HOME", async () => {
     const sb = makeSandbox({ tools: [...DEFAULT_TOOLS, "getconf", "ldd"] });
     try {
@@ -99,8 +108,12 @@ describe.skipIf(!assets)("real release assets", () => {
     const extracted = join(root, "pkg");
     mkdirSync(extracted);
     expect(spawnSync("/usr/bin/bsdtar", ["-xf", join(env.PKGDEST, pkg), "-C", extracted]).status).toBe(0);
-    for (const path of ["usr/bin/snipset", "usr/bin/snipset-shims", "usr/share/bash-completion/completions/snipset.bash", "usr/share/licenses/snipset-cli/LICENSE"]) {
-      expect(existsSync(join(extracted, path))).toBe(true);
+    for (const path of ["usr/bin/snipset", "usr/bin/snipset-shims", "usr/share/bash-completion/completions/snipset.bash", "usr/share/licenses/snipset-cli/LICENSE", "usr/share/licenses/snipset-cli/THIRD-PARTY-NOTICES.txt"]) {
+      expect(existsSync(join(extracted, path)), `${path} is missing from ${pkg}`).toBe(true);
+    }
+    for (const name of ["LICENSE", "THIRD-PARTY-NOTICES.txt"]) {
+      const shipped = spawnSync("/usr/bin/bsdtar", ["-xOf", join(assets, linuxAsset), name]).stdout;
+      expect(readFileSync(join(extracted, "usr", "share", "licenses", "snipset-cli", name)).equals(shipped)).toBe(true);
     }
     const run = spawnSync(join(extracted, "usr", "bin", "snipset"), ["--version"], { encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: env.HOME } });
     expect(run.stdout.trim()).toMatch(versionLine);

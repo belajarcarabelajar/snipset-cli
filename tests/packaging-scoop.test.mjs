@@ -71,6 +71,16 @@ describe("scoop bucket manifest", () => {
     expect(readManifest().autoupdate.hash).toEqual({ url: "$baseurl/SHA256SUMS" });
   });
 
+  // Scoop extracts the whole zip into the app dir unless a manifest key narrows or moves it,
+  // so LICENSE and THIRD-PARTY-NOTICES.txt from the zip root land next to snipset.exe.
+  test("no manifest key narrows the zip, so its LICENSE and THIRD-PARTY-NOTICES.txt stay installed", () => {
+    const manifest = readManifest();
+    const narrowing = ["extract_dir", "extract_to", "installer", "pre_install", "post_install", "persist"];
+    for (const scope of [manifest, manifest.architecture["64bit"]]) {
+      expect(Object.keys(scope).filter((key) => narrowing.includes(key))).toEqual([]);
+    }
+  });
+
   test("bucket directory holds only snipset.json", () => {
     expect(readdirSync(BUCKET).sort()).toEqual(["snipset.json"]);
   });

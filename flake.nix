@@ -25,6 +25,7 @@
           install -Dm755 snipset $out/bin/snipset
           install -Dm755 shell/snipset-shims.sh $out/bin/snipset-shims
           installShellCompletion --bash --name snipset.bash shell/completion.bash
+          install -Dm644 -t $out/share/doc/snipset-cli LICENSE THIRD-PARTY-NOTICES.txt
           runHook postInstall
         '';
         meta = {

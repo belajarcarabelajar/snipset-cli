@@ -19,6 +19,7 @@ class Snipset < Formula
     bin.install "shell/snipset-shims.sh" => "snipset-shims"
     bash_completion.install "shell/completion.bash" => "snipset"
     pkgshare.install "shell/snipset.sh", "shell/tab.sh"
+    prefix.install "LICENSE", "THIRD-PARTY-NOTICES.txt"
   end
 
   test do
