@@ -45,6 +45,7 @@
     "tests/pentest-aux.test.mjs": 820,
     "tests/pentest-core.test.mjs": 442,
     "tests/readme-install.test.mjs": 11,
+    "tests/snipset-live-backup.test.mjs": 69,
     "tests/snipset-live-cli-drift.test.mjs": 1340,
     "tests/snipset-live-doctor-message.test.mjs": 22,
     "tests/snipset-live-hardening.test.mjs": 56,

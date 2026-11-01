@@ -360,13 +360,19 @@ A refresh runs `snipset --db <live> backup --to <snap> --force` when
 database to the snapshot file with SQLite's online backup, which is safe while
 Snipset Desktop writes. If the backup fails, its error goes to stderr and the
 wrapper exits with the CLI's exit code; it does not fall back to copying files.
-With an older CLI, such as v0.2.0, the wrapper prints this line on stderr and
-copies the whole live database, plus its `-wal` and `-shm` files when they
-exist, into the snapshot directory:
+With an older CLI, such as v0.2.0, `snipset backup --help` exits 2 for the
+unknown subcommand, and the wrapper prints this line on stderr and copies the
+whole live database, plus its `-wal` and `-shm` files when they exist, into the
+snapshot directory:
 
 ```text
 snipset-live: this snipset has no backup command; copying files instead, which can be inconsistent while Snipset Desktop writes
 ```
+
+Any other exit code from `snipset backup --help` stops a refresh: the wrapper
+prints one line on stderr naming that code and exits with it, without
+refreshing the snapshot or running your command. If `snipset` is not on `PATH`
+when a refresh is due, the wrapper says so and exits 127.
 
 ## Manual downloads
 
