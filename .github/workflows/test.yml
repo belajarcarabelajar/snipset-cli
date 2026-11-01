@@ -160,7 +160,10 @@ jobs:
           iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
           Join-Path $env:USERPROFILE 'scoop\shims' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Install the bucket manifest from this checkout
-        run: scoop install ./bucket/snipset.json
+        # A relative path reads as <bucket>/<app> (bucket '.'); an absolute path is a local manifest.
+        run: |
+          scoop install (Resolve-Path .\bucket\snipset.json).Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Remove the runner's OpenSSL DLLs from System32
         run: |
           $sys = Join-Path $env:SystemRoot 'System32'
